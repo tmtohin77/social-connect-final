@@ -9,11 +9,13 @@ import NotificationsModal from '../components/notifications/NotificationsModal';
 import { Loader2, Bell, MessageCircle, X } from 'lucide-react';
 import { appLogo } from '../data/mockData';
 
+// ✅ ইন্টারফেস আপডেট করা হলো
 interface HomeScreenProps {
   onOpenChat: () => void;
+  onViewProfile?: (userId: string) => void;
 }
 
-const HomeScreen: React.FC<HomeScreenProps> = ({ onOpenChat }) => {
+const HomeScreen: React.FC<HomeScreenProps> = ({ onOpenChat, onViewProfile }) => {
   const { user } = useAuth();
   const [posts, setPosts] = useState<any[]>([]);
   const [stories, setStories] = useState<any[]>([]);
@@ -149,7 +151,13 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onOpenChat }) => {
                 </div>
             ) : (
                 posts.map(post => (
-                    <PostCard key={post.id} post={post} onCommentClick={openCommentModal} onDelete={fetchPosts} />
+                    <PostCard 
+                        key={post.id} 
+                        post={post} 
+                        onCommentClick={openCommentModal} 
+                        onDelete={fetchPosts}
+                        onProfileClick={onViewProfile} // ✅ প্রপস পাস করা হলো
+                    />
                 ))
             )}
         </div>
