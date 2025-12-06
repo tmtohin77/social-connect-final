@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
-import { ArrowLeft, Send, Phone, Video, Loader2, Image as ImageIcon, Smile, X, Mic, StopCircle } from 'lucide-react';
+import { ArrowLeft, Send, Phone, Video, Loader2, Image as ImageIcon, Smile, X, Mic, StopCircle, Trash2 } from 'lucide-react';
 import EmojiPicker from 'emoji-picker-react';
 import { formatDistanceToNow } from 'date-fns';
 
@@ -36,23 +36,26 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
   const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
 
+  // Delete State
+  const [selectedMessageId, setSelectedMessageId] = useState<string | null>(null);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     fetchMessages();
 
-    // ✅ Real-time Subscription (Fixed)
     const channel = supabase
       .channel(`room:${receiver.id}`)
-      .on('postgres_changes', { 
-        event: 'INSERT', 
-        schema: 'public', 
-        table: 'messages'
-      }, (payload) => {
-        const newMsg = payload.new;
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, (payload) => {
+        // DELETE Event
+        if (payload.eventType === 'DELETE') {
+            setMessages(prev => prev.filter(m => m.id !== payload.old.id));
+            return;
+        }
         
-        // Check if message belongs to this chat
+        // INSERT Event
+        const newMsg = payload.new;
         let isMatch = false;
         if (isGroup) {
             isMatch = newMsg.group_id === receiver.id;
@@ -63,7 +66,7 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
 
         if (isMatch) {
             setMessages(prev => {
-                if (prev.some(m => m.id === newMsg.id)) return prev; // Avoid duplicates
+                if (prev.some(m => m.id === newMsg.id)) return prev;
                 return [...prev, newMsg];
             });
             if (newMsg.sender_id !== user?.id) playSound('message');
@@ -73,25 +76,25 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [receiver.id, isGroup, user?.id]);
+  }, [receiver.id]);
 
   const fetchMessages = async () => {
     let query = supabase.from('messages').select('*').order('created_at', { ascending: true });
-
-    if (isGroup) {
-        query = query.eq('group_id', receiver.id);
-    } else {
-        query = query.or(`and(sender_id.eq.${user?.id},receiver_id.eq.${receiver.id}),and(sender_id.eq.${receiver.id},receiver_id.eq.${user?.id})`);
-    }
+    if (isGroup) query = query.eq('group_id', receiver.id);
+    else query = query.or(`and(sender_id.eq.${user?.id},receiver_id.eq.${receiver.id}),and(sender_id.eq.${receiver.id},receiver_id.eq.${user?.id})`);
     
     const { data } = await query;
-    if (data) {
-        setMessages(data);
-        scrollToBottom();
+    if (data) { setMessages(data); scrollToBottom(); }
+  };
+
+  const deleteMessage = async (msgId: string) => {
+    if (window.confirm("Delete this message?")) {
+        await supabase.from('messages').delete().eq('id', msgId);
+        setMessages(prev => prev.filter(m => m.id !== msgId));
+        setSelectedMessageId(null);
     }
   };
 
-  // --- Sending Logic ---
   const handleSendMessage = async (e?: React.FormEvent, type: string = 'text', customContent?: string, fileBlob?: Blob) => {
     e?.preventDefault();
     const content = customContent || newMessage;
@@ -101,15 +104,12 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
     let uploadedUrl = null;
 
     try {
-        // Upload File (Image or Audio)
         const fileToUpload = fileBlob || selectedImage;
         if (fileToUpload) {
             const ext = type === 'audio' ? 'webm' : 'png';
             const fileName = `chat_${Date.now()}_${Math.random()}.${ext}`;
-            
             const { error: upErr } = await supabase.storage.from('post_images').upload(fileName, fileToUpload);
             if (upErr) throw upErr;
-            
             const { data } = supabase.storage.from('post_images').getPublicUrl(fileName);
             uploadedUrl = data.publicUrl;
         }
@@ -124,24 +124,16 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
             created_at: new Date().toISOString()
         };
 
-        // Optimistic Update
-        // setMessages(prev => [...prev, msgData]); // Realtime handles this now
-        scrollToBottom();
-        if (type === 'text') playSound('message');
-
-        // Reset
         setNewMessage('');
         setSelectedImage(null);
         setImagePreview(null);
         setShowEmoji(false);
 
-        // DB Insert
         const { error } = await supabase.from('messages').insert(msgData);
         if (error) throw error;
 
     } catch (error) {
         console.error("Failed to send:", error);
-        alert("Message failed to send.");
     } finally {
         setSending(false);
     }
@@ -161,9 +153,7 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
       recorder.start();
       setMediaRecorder(recorder);
       setIsRecording(true);
-    } catch (err) {
-      alert('Microphone blocked');
-    }
+    } catch (err) { alert('Microphone blocked'); }
   };
 
   const stopRecording = () => {
@@ -186,8 +176,9 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
     setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
   };
 
-  // --- Render Message ---
   const renderMessageContent = (msg: any, isMe: boolean) => {
+    const isSelected = selectedMessageId === msg.id;
+
     if (msg.type?.startsWith('call_')) {
       return (
         <div className="flex flex-col items-center justify-center my-4 w-full">
@@ -200,22 +191,32 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
       );
     }
 
-    if (msg.type === 'audio') {
-      return (
-        <div className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-          <div className={`px-3 py-2 rounded-2xl shadow-sm ${isMe ? 'bg-blue-600' : 'bg-white dark:bg-gray-800 border dark:border-gray-700'}`}>
-            <audio controls src={msg.image_url} className="h-8 w-48" />
-          </div>
-        </div>
-      );
-    }
-
     return (
-      <div className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-        <div className={`max-w-[75%] rounded-2xl shadow-sm overflow-hidden 
+      <div 
+        className={`flex ${isMe ? 'justify-end' : 'justify-start'} group relative`}
+        onClick={() => isMe && setSelectedMessageId(isSelected ? null : msg.id)}
+      >
+        {/* Delete Button Popup */}
+        {isSelected && isMe && (
+            <button onClick={() => deleteMessage(msg.id)} className="absolute -top-8 bg-black/80 text-white px-3 py-1 rounded-lg text-xs flex items-center gap-1 hover:bg-red-600 transition z-10">
+                <Trash2 size={12} /> Delete
+            </button>
+        )}
+
+        <div className={`max-w-[75%] rounded-2xl shadow-sm overflow-hidden cursor-pointer
           ${isMe ? 'bg-blue-600 text-white rounded-br-none' : 'bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 border dark:border-gray-700 rounded-bl-none'}`}>
-          {msg.image_url && <img src={msg.image_url} className="w-full h-auto max-h-60 object-cover" />}
-          {msg.content && msg.type !== 'image' && <div className="px-4 py-2 text-sm break-words whitespace-pre-wrap">{msg.content}</div>}
+          
+          {msg.image_url && msg.type === 'image' && <img src={msg.image_url} alt="Sent" className="w-full h-auto max-h-60 object-cover" />}
+          
+          {msg.type === 'audio' && (
+             <div className="px-3 py-2 flex items-center gap-2">
+                <audio controls src={msg.image_url} className="h-8 w-48" />
+             </div>
+          )}
+
+          {msg.content && msg.type !== 'image' && msg.type !== 'audio' && (
+            <div className="px-4 py-2 text-sm break-words whitespace-pre-wrap">{msg.content}</div>
+          )}
         </div>
       </div>
     );
@@ -223,7 +224,6 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
 
   return (
     <div className="flex flex-col h-screen bg-gray-50 dark:bg-gray-950 fixed inset-0 z-50 transition-colors">
-      {/* Header */}
       <div className="bg-white dark:bg-gray-900 p-3 shadow-sm flex items-center justify-between border-b dark:border-gray-800">
         <div className="flex items-center gap-3">
             <button onClick={onBack} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full dark:text-white"><ArrowLeft size={22} /></button>
@@ -234,7 +234,7 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
                 </div>
                 <div>
                     <h3 className="font-bold text-sm dark:text-white">{receiver.name}</h3>
-                    <span className="text-xs text-gray-500 dark:text-gray-400">{isGroup ? 'Group Chat' : 'Active now'}</span>
+                    <span className="text-xs text-green-600">{isGroup ? 'Group Chat' : 'Active now'}</span>
                 </div>
             </div>
         </div>
@@ -246,15 +246,13 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
         )}
       </div>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50 dark:bg-gray-950" onClick={() => setShowEmoji(false)}>
+      <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50 dark:bg-gray-950" onClick={() => {setShowEmoji(false); setSelectedMessageId(null);}}>
         {messages.map((msg, idx) => (
             <React.Fragment key={idx}>{renderMessageContent(msg, msg.sender_id === user?.id)}</React.Fragment>
         ))}
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input */}
       <div className="p-3 bg-white dark:bg-gray-900 border-t dark:border-gray-800 relative">
         {imagePreview && (
             <div className="absolute bottom-20 left-4 bg-white dark:bg-gray-800 p-2 rounded-xl shadow-lg border z-10">
@@ -268,8 +266,7 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
             <button type="button" onClick={() => setShowEmoji(!showEmoji)} className="p-2 text-gray-500"><Smile size={24} /></button>
             <button type="button" onClick={() => fileInputRef.current?.click()} className="p-2 text-gray-500"><ImageIcon size={24} /></button>
             <input type="file" ref={fileInputRef} hidden accept="image/*" onChange={handleImageSelect} />
-            
-            <input value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder={isGroup ? `Message ${receiver.name}...` : "Type a message..."} className="flex-1 bg-transparent px-2 py-2 focus:outline-none text-sm dark:text-white" />
+            <input value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder="Type a message..." className="flex-1 bg-transparent px-2 py-2 focus:outline-none text-sm dark:text-white" />
             
             {newMessage.trim() || selectedImage ? (
                 <button type="submit" disabled={sending} className="p-2 bg-blue-600 text-white rounded-full flex justify-center w-10 h-10 shadow-md">
