@@ -1,16 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
-import { Search, UserX, Loader2, Users } from 'lucide-react';
+import { Search, MessageCircle, UserX, Loader2, Users, ArrowLeft } from 'lucide-react'; // ArrowLeft added
 import CreateGroupModal from './CreateGroupModal';
 
 interface ChatListProps {
   onSelectUser: (chat: any) => void;
+  onBack: () => void; // Back function added
 }
 
-const ChatListScreen: React.FC<ChatListProps> = ({ onSelectUser }) => {
+const ChatListScreen: React.FC<ChatListProps> = ({ onSelectUser, onBack }) => {
   const { user } = useAuth();
-  const [items, setItems] = useState<any[]>([]); // Friends + Groups
+  const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateGroup, setShowCreateGroup] = useState(false);
 
@@ -21,7 +22,7 @@ const ChatListScreen: React.FC<ChatListProps> = ({ onSelectUser }) => {
   const fetchData = async () => {
     if (!user) return;
     
-    // ১. ফ্রেন্ডস আনো
+    // Friends Fetching Logic...
     const { data: sent } = await supabase.from('friendships').select('receiver_id').eq('requester_id', user.id).eq('status', 'accepted');
     const { data: received } = await supabase.from('friendships').select('requester_id').eq('receiver_id', user.id).eq('status', 'accepted');
     
@@ -35,9 +36,8 @@ const ChatListScreen: React.FC<ChatListProps> = ({ onSelectUser }) => {
       if (data) friendsList = data.map(f => ({ ...f, type: 'user' }));
     }
 
-    // ২. গ্রুপ আনো
+    // Groups Fetching Logic...
     const { data: groups } = await supabase.from('groups').select('*').order('created_at', { ascending: false });
-    // Note: RLS will ensure I only get groups I'm in
     const groupsList = groups ? groups.map(g => ({ ...g, type: 'group' })) : [];
 
     setItems([...groupsList, ...friendsList]);
@@ -46,19 +46,30 @@ const ChatListScreen: React.FC<ChatListProps> = ({ onSelectUser }) => {
 
   return (
     <div className="min-h-screen bg-white dark:bg-gray-900 pb-20 animate-fade-in transition-colors">
-      <div className="sticky top-0 bg-white dark:bg-gray-900 z-10 p-4 border-b dark:border-gray-800">
-        <div className="flex justify-between items-center mb-4">
-            <h1 className="text-2xl font-bold dark:text-white">Messages</h1>
+      
+      {/* ✅ Fixed Header Layout */}
+      <div className="sticky top-0 bg-white dark:bg-gray-900 z-10 px-4 py-3 border-b dark:border-gray-800">
+        <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+                {/* Back Button Added */}
+                <button onClick={onBack} className="p-2 bg-gray-100 dark:bg-gray-800 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition">
+                    <ArrowLeft size={20} className="text-gray-700 dark:text-white" />
+                </button>
+                <h1 className="text-2xl font-bold dark:text-white">Messages</h1>
+            </div>
+            
             <button onClick={() => setShowCreateGroup(true)} className="p-2 bg-blue-50 dark:bg-blue-900/30 text-blue-600 rounded-full hover:bg-blue-100 transition">
                 <Users size={20} />
             </button>
         </div>
+
         <div className="relative">
           <Search className="absolute left-3 top-3.5 text-gray-400" size={20} />
-          <input type="text" placeholder="Search..." className="w-full bg-gray-100 dark:bg-gray-800 dark:text-white py-3 pl-10 pr-4 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900" />
+          <input type="text" placeholder="Search chats..." className="w-full bg-gray-100 dark:bg-gray-800 dark:text-white py-3 pl-10 pr-4 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900" />
         </div>
       </div>
 
+      {/* List */}
       <div className="p-2">
         {loading ? (
           <div className="flex justify-center mt-10"><Loader2 className="animate-spin text-blue-600"/></div>

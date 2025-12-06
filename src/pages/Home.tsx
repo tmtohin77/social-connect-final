@@ -42,31 +42,55 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onOpenChat, onViewProfile }) =>
   const storyInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    fetchPosts();
-    fetchStories();
-  }, []);
+    if (user) {
+        fetchPosts();
+        fetchStories();
+    }
+  }, [user]);
 
   const fetchPosts = async () => {
-    const { data, error } = await supabase
-      .from('posts')
-      .select(`
-        *,
-        users (name, avatar),
-        original_post:original_post_id (
-          id,
-          content,
-          image_url,
-          created_at,
-          users (name, avatar)
-        )
-      `)
-      .order('created_at', { ascending: false });
+    if (!user) return;
 
-    if (!error && data) setPosts(data);
-    setLoading(false);
+    try {
+        // ১. আমার সব ফ্রেন্ডের আইডি বের করো
+        const { data: sent } = await supabase.from('friendships').select('receiver_id').eq('requester_id', user.id).eq('status', 'accepted');
+        const { data: received } = await supabase.from('friendships').select('requester_id').eq('receiver_id', user.id).eq('status', 'accepted');
+        
+        const friendIds = new Set<string>();
+        sent?.forEach(f => friendIds.add(f.receiver_id));
+        received?.forEach(f => friendIds.add(f.requester_id));
+        friendIds.add(user.id); // নিজের পোস্টও দেখতে চাই
+
+        // ২. শুধু ফ্রেন্ডদের এবং নিজের পোস্ট আনো
+        const { data, error } = await supabase
+          .from('posts')
+          .select(`
+            *,
+            users (name, avatar),
+            original_post:original_post_id (
+              id,
+              content,
+              image_url,
+              created_at,
+              users (name, avatar)
+            )
+          `)
+          .in('user_id', Array.from(friendIds)) // ✅ Privacy Filter Added
+          .order('created_at', { ascending: false });
+
+        if (!error && data) setPosts(data);
+    } catch (error) {
+        console.error("Error fetching posts:", error);
+    } finally {
+        setLoading(false);
+    }
   };
 
   const fetchStories = async () => {
+    if (!user) return;
+
+    // ১. স্টোরির জন্যও একই ফ্রেন্ড ফিল্টার (Optional: চাইলে স্টোরিও শুধু ফ্রেন্ডদের দেখাতে পারো)
+    // আপাতত সব একটিভ স্টোরি আনছি, পরে ফিল্টার করা যাবে
     const { data } = await supabase
       .from('stories')
       .select('*, users(name, avatar)')
@@ -199,7 +223,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onOpenChat, onViewProfile }) =>
             ) : posts.length === 0 ? (
                 <div className="text-center py-16 text-gray-500 dark:text-gray-400">
                     <p className="text-lg font-medium">No posts yet 😢</p>
-                    <p className="text-sm">Be the first to share something!</p>
+                    <p className="text-sm">Add friends to see their posts!</p>
                 </div>
             ) : (
                 posts.map(post => (
