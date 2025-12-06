@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import { avatars } from '../data/mockData';
+import Peer from 'peerjs';
 
 interface User {
   id: string;
@@ -12,7 +13,8 @@ interface User {
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  onlineUsers: Set<string>; // ✅ নতুন স্টেট (অনলাইন ইউজারদের আইডি)
+  onlineUsers: Set<string>;
+  peer: Peer | null; // ✅ Peer Instance
   login: (email: string, password: string) => Promise<{ error: any }>;
   register: (data: any) => Promise<{ error: any }>;
   verifyEmail: (email: string, token: string) => Promise<{ error: any }>;
@@ -25,18 +27,20 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [onlineUsers, setOnlineUsers] = useState<Set<string>>(new Set());
+  const [peer, setPeer] = useState<Peer | null>(null);
 
   useEffect(() => {
-    // সেশন চেক করা
+    // ১. সেশন চেক করা
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
         fetchProfile(session.user.id, session.user.email!);
-        setupPresence(session.user.id); // ✅ অনলাইন স্ট্যাটাস চালু
+        setupPresence(session.user.id);
       } else {
         setLoading(false);
       }
     });
 
+    // ২. অথেনটিকেশন পরিবর্তন লিসেনার
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session?.user) {
         fetchProfile(session.user.id, session.user.email!);
@@ -50,7 +54,18 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return () => subscription.unsubscribe();
   }, []);
 
-  // ✅ রিয়েল-টাইম অনলাইন স্ট্যাটাস সেটআপ
+  // ৩. PeerJS কানেকশন সেটআপ (যখন ইউজার লগইন করবে)
+  useEffect(() => {
+    if (user) {
+      const newPeer = new Peer(user.id); // ইউজার আইডি দিয়ে পিয়ার তৈরি
+      setPeer(newPeer);
+      return () => {
+        newPeer.destroy();
+      };
+    }
+  }, [user]); // user স্টেট পরিবর্তন হলে রান হবে
+
+  // অনলাইন স্ট্যাটাস লজিক
   const setupPresence = (userId: string) => {
     const room = supabase.channel('online-users', {
       config: { presence: { key: userId } },
@@ -110,11 +125,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const logout = async () => {
     await supabase.auth.signOut();
-    supabase.removeAllChannels(); // সব চ্যানেল বন্ধ করো
+    supabase.removeAllChannels();
+    if (peer) peer.destroy(); // লগআউট হলে পিয়ার ধ্বংস করো
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, onlineUsers, login, register, verifyEmail, logout }}>
+    <AuthContext.Provider value={{ user, loading, onlineUsers, peer, login, register, verifyEmail, logout }}>
       {children}
     </AuthContext.Provider>
   );
