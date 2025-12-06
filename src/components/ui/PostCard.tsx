@@ -58,7 +58,11 @@ const PostCard: React.FC<PostCardProps> = ({ post, onCommentClick }) => {
       </div>
 
       {/* Content */}
-      {post.content && <p className="px-4 pb-3 text-gray-800 dark:text-gray-200 text-sm leading-relaxed">{post.content}</p>}
+{post.content && (
+  <p className="px-4 pb-3 text-gray-800 dark:text-gray-200 text-sm leading-relaxed whitespace-pre-wrap break-words">
+    {post.content}
+  </p>
+)}
 
       {/* Image */}
       {post.image_url && (
