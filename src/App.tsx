@@ -4,6 +4,7 @@ import LoginScreen from './components/auth/LoginScreen';
 import RegisterScreen from './components/auth/RegisterScreen';
 import HomeScreen from './pages/Home';
 import ProfileScreen from './pages/Profile';
+import UserProfile from './pages/UserProfile'; // New Import
 import MenuScreen from './components/menu/MenuScreen';
 import SearchScreen from './components/shared/SearchScreen';
 import ChatListScreen from './components/messenger/ChatListScreen';
@@ -11,7 +12,6 @@ import ChatRoomScreen from './components/messenger/ChatRoomScreen';
 import { appLogo } from './data/mockData';
 import { Home, Search, User, Menu } from 'lucide-react';
 
-// Welcome Screen
 const WelcomeScreen = ({ onLogin, onRegister }: any) => (
   <div className="min-h-screen bg-gradient-to-br from-blue-600 to-purple-600 flex flex-col items-center justify-center p-6 text-white text-center">
     <div className="bg-white p-4 rounded-3xl shadow-2xl mb-8 animate-bounce-slow">
@@ -26,28 +26,38 @@ const WelcomeScreen = ({ onLogin, onRegister }: any) => (
   </div>
 );
 
-// Main Content Logic
 const AppContent = () => {
   const { user, loading } = useAuth();
   const [authView, setAuthView] = useState<'welcome' | 'login' | 'register'>('welcome');
-  
-  // Navigation States
   const [appView, setAppView] = useState<'home' | 'search' | 'profile' | 'menu' | 'chat'>('home');
   const [selectedChatUser, setSelectedChatUser] = useState<any>(null);
+  const [viewProfileId, setViewProfileId] = useState<string | null>(null); // অন্যের প্রোফাইল দেখার জন্য
 
   if (loading) return <div className="h-screen flex items-center justify-center text-blue-600 dark:bg-gray-900">Loading...</div>;
 
-  // -- Authenticated View --
   if (user) {
     // ১. চ্যাট রুম (ফুল স্ক্রিন)
     if (selectedChatUser) {
         return <ChatRoomScreen receiver={selectedChatUser} onBack={() => setSelectedChatUser(null)} />;
     }
 
-    // ২. মেইন অ্যাপ ভিউ
+    // ২. অন্যের প্রোফাইল দেখা (ফুল স্ক্রিন)
+     if (viewProfileId) {
+        return (
+            <UserProfile 
+                userId={viewProfileId} 
+                onBack={() => setViewProfileId(null)} 
+                onMessage={(user) => {
+                    setViewProfileId(null); // প্রোফাইল বন্ধ করো
+                    setSelectedChatUser(user); // চ্যাট রুম চালু করো
+                }} 
+            />
+        );
+    }
+    // ৩. মেইন অ্যাপ
     return (
       <div className="dark:bg-gray-900 min-h-screen transition-colors duration-300">
-        {appView === 'home' && <HomeScreen onOpenChat={() => setAppView('chat')} />}
+        {appView === 'home' && <HomeScreen onOpenChat={() => setAppView('chat')} onViewProfile={(id) => setViewProfileId(id)} />}
         {appView === 'profile' && <ProfileScreen onBack={() => setAppView('home')} />}
         {appView === 'menu' && <MenuScreen />}
         {appView === 'search' && <SearchScreen />}
@@ -61,7 +71,7 @@ const AppContent = () => {
             </div>
         )}
 
-        {/* Global Bottom Navigation (ডার্ক মোড সাপোর্টেড) */}
+        {/* Global Bottom Navigation */}
         {appView !== 'chat' && (
             <div className="fixed bottom-0 w-full bg-white dark:bg-gray-900 border-t border-gray-100 dark:border-gray-800 p-2 pb-3 flex justify-around z-50 shadow-[0_-5px_15px_rgba(0,0,0,0.05)] transition-colors duration-300">
             
@@ -90,7 +100,6 @@ const AppContent = () => {
     );
   }
 
-  // -- Guest View --
   if (authView === 'login') return <LoginScreen onBack={() => setAuthView('welcome')} onRegisterClick={() => setAuthView('register')} />;
   if (authView === 'register') return <RegisterScreen onBack={() => setAuthView('welcome')} />;
   return <WelcomeScreen onLogin={() => setAuthView('login')} onRegister={() => setAuthView('register')} />;

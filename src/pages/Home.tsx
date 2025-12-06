@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import PostCard from '../components/ui/PostCard';
@@ -20,13 +20,12 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onOpenChat }) => {
   const [loading, setLoading] = useState(true);
   const [uploadingStory, setUploadingStory] = useState(false);
   
-  // Modals
   const [showComments, setShowComments] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [selectedPostId, setSelectedPostId] = useState('');
-  const [viewStory, setViewStory] = useState<string | null>(null); // Image URL showing
+  const [viewStory, setViewStory] = useState<string | null>(null);
 
-  const storyInputRef = useRef<HTMLInputElement>(null);
+  const storyInputRef = React.useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     fetchPosts();
@@ -34,24 +33,33 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onOpenChat }) => {
   }, []);
 
   const fetchPosts = async () => {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('posts')
-      .select('*, users(name, avatar)')
+      .select(`
+        *,
+        users (name, avatar),
+        original_post:original_post_id (
+          id,
+          content,
+          image_url,
+          created_at,
+          users (name, avatar)
+        )
+      `)
       .order('created_at', { ascending: false });
-    if (data) setPosts(data);
+
+    if (!error && data) setPosts(data);
     setLoading(false);
   };
 
   const fetchStories = async () => {
-    // শুধু একটিভ স্টোরি আনো (যার মেয়াদ শেষ হয়নি)
     const { data } = await supabase
       .from('stories')
       .select('*, users(name, avatar)')
-      .gt('expires_at', new Date().toISOString()) // Not expired
+      .gt('expires_at', new Date().toISOString())
       .order('created_at', { ascending: false });
     
     if (data) {
-        // ডুপ্লিকেট ইউজার রিমুভ করা (একজন ইউজারের লেটেস্ট স্টোরি দেখানো)
         const uniqueStories = Array.from(new Map(data.map(item => [item.user_id, item])).values());
         setStories(uniqueStories);
     }
@@ -64,18 +72,15 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onOpenChat }) => {
     try {
       const file = e.target.files[0];
       const fileName = `story_${user?.id}_${Date.now()}`;
-      
-      // 1. Upload Image
       await supabase.storage.from('stories').upload(fileName, file);
       const { data } = supabase.storage.from('stories').getPublicUrl(fileName);
       
-      // 2. Insert to DB
       await supabase.from('stories').insert({
         user_id: user?.id,
         image_url: data.publicUrl
       });
 
-      fetchStories(); // Refresh list
+      fetchStories();
     } catch (error) {
       console.error(error);
       alert('Failed to upload story');
@@ -111,20 +116,13 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onOpenChat }) => {
       <div className="max-w-xl mx-auto">
         {/* Stories Section */}
         <div className="bg-white dark:bg-gray-800 py-4 border-b border-gray-100 dark:border-gray-700 mb-4 overflow-x-auto no-scrollbar flex gap-4 px-4 transition-colors">
-            {/* My Story Upload */}
             <div className="relative">
                 <StoryCircle 
                     user={{ name: "You", avatar: user?.avatar || "" }} 
                     isAddStory 
                     onClick={() => storyInputRef.current?.click()} 
                 />
-                <input 
-                    type="file" 
-                    ref={storyInputRef} 
-                    hidden 
-                    accept="image/*" 
-                    onChange={handleStoryUpload} 
-                />
+                <input type="file" ref={storyInputRef} hidden accept="image/*" onChange={handleStoryUpload} />
                 {uploadingStory && (
                     <div className="absolute inset-0 bg-white/50 rounded-full flex items-center justify-center">
                         <Loader2 className="animate-spin text-blue-600" size={20} />
@@ -132,22 +130,15 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onOpenChat }) => {
                 )}
             </div>
             
-            {/* Friends' Stories */}
             {stories.map((story) => (
-                <StoryCircle 
-                    key={story.id} 
-                    user={story.users} 
-                    onClick={() => setViewStory(story.image_url)} 
-                />
+                <StoryCircle key={story.id} user={story.users} onClick={() => setViewStory(story.image_url)} />
             ))}
         </div>
 
-        {/* Create Post */}
         <div className="px-4">
             <CreatePost onPostCreated={fetchPosts} />
         </div>
 
-        {/* Feed Section */}
         <div className="px-4 mt-2">
             {loading ? (
                 <div className="flex justify-center py-12"><Loader2 className="animate-spin text-blue-600" size={32} /></div>
@@ -158,23 +149,19 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onOpenChat }) => {
                 </div>
             ) : (
                 posts.map(post => (
-                    <PostCard key={post.id} post={post} onCommentClick={openCommentModal} />
+                    <PostCard key={post.id} post={post} onCommentClick={openCommentModal} onDelete={fetchPosts} />
                 ))
             )}
         </div>
       </div>
 
-      {/* Modals */}
       <CommentModal isOpen={showComments} onClose={() => setShowComments(false)} postId={selectedPostId} />
       <NotificationsModal isOpen={showNotifications} onClose={() => setShowNotifications(false)} />
 
-      {/* Story Viewer (Full Screen) */}
       {viewStory && (
         <div className="fixed inset-0 z-[70] bg-black flex items-center justify-center" onClick={() => setViewStory(null)}>
             <img src={viewStory} className="max-h-full max-w-full object-contain" />
-            <button className="absolute top-4 right-4 text-white p-2 bg-white/20 rounded-full">
-                <X size={24} />
-            </button>
+            <button className="absolute top-4 right-4 text-white p-2 bg-white/20 rounded-full"><X size={24} /></button>
         </div>
       )}
     </div>
