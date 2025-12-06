@@ -5,7 +5,6 @@ import { ArrowLeft, Send, Phone, Video, Loader2, Image as ImageIcon, Smile, X, M
 import EmojiPicker from 'emoji-picker-react';
 import { formatDistanceToNow } from 'date-fns';
 
-// Simple sound player
 const playSound = (type: 'message') => {
   const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2354/2354-preview.mp3');
   audio.volume = 0.5;
@@ -13,7 +12,7 @@ const playSound = (type: 'message') => {
 };
 
 interface ChatRoomProps {
-  receiver: any; // User or Group object
+  receiver: any;
   onBack: () => void;
   onViewProfile?: (userId: string) => void;
   onStartCall?: (isVideo: boolean) => void;
@@ -25,15 +24,14 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
   const [newMessage, setNewMessage] = useState('');
   const [sending, setSending] = useState(false);
   
-  // চেক করো এটা গ্রুপ চ্যাট কিনা
   const isGroup = receiver.type === 'group';
 
-  // Advanced Features
+  // UI States
   const [showEmoji, setShowEmoji] = useState(false);
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   
-  // Voice Recording States
+  // Audio States
   const [isRecording, setIsRecording] = useState(false);
   const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -44,34 +42,38 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
   useEffect(() => {
     fetchMessages();
 
-    // Real-time Subscription (Updated for Group)
+    // ✅ Real-time Subscription (Fixed)
     const channel = supabase
-      .channel('realtime:messages')
+      .channel(`room:${receiver.id}`)
       .on('postgres_changes', { 
         event: 'INSERT', 
         schema: 'public', 
-        table: 'messages',
-        filter: isGroup ? `group_id=eq.${receiver.id}` : `receiver_id=eq.${user?.id}`
+        table: 'messages'
       }, (payload) => {
+        const newMsg = payload.new;
+        
+        // Check if message belongs to this chat
+        let isMatch = false;
         if (isGroup) {
-            // গ্রুপ চ্যাটের জন্য: যদি এই গ্রুপের মেসেজ হয়
-            if (payload.new.group_id === receiver.id) {
-                setMessages(prev => [...prev, payload.new]);
-                scrollToBottom();
-            }
+            isMatch = newMsg.group_id === receiver.id;
         } else {
-            // পার্সোনাল চ্যাটের জন্য: যদি এই সেন্ডার পাঠায়
-            if (payload.new.sender_id === receiver.id) {
-                setMessages(prev => [...prev, payload.new]);
-                playSound('message'); 
-                scrollToBottom();
-            }
+            isMatch = (newMsg.sender_id === receiver.id && newMsg.receiver_id === user?.id) ||
+                      (newMsg.sender_id === user?.id && newMsg.receiver_id === receiver.id);
+        }
+
+        if (isMatch) {
+            setMessages(prev => {
+                if (prev.some(m => m.id === newMsg.id)) return prev; // Avoid duplicates
+                return [...prev, newMsg];
+            });
+            if (newMsg.sender_id !== user?.id) playSound('message');
+            scrollToBottom();
         }
       })
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [receiver.id]);
+  }, [receiver.id, isGroup, user?.id]);
 
   const fetchMessages = async () => {
     let query = supabase.from('messages').select('*').order('created_at', { ascending: true });
@@ -89,130 +91,94 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
     }
   };
 
-  // --- Voice Recording Logic ---
-  const startRecording = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
-      audioChunksRef.current = [];
-
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) audioChunksRef.current.push(e.data);
-      };
-
-      recorder.onstop = sendVoiceMessage;
-      recorder.start();
-      setMediaRecorder(recorder);
-      setIsRecording(true);
-    } catch (err) {
-      alert('Microphone permission denied');
-    }
-  };
-
-  const stopRecording = () => {
-    if (mediaRecorder && isRecording) {
-      mediaRecorder.stop();
-      setIsRecording(false);
-      mediaRecorder.stream.getTracks().forEach(track => track.stop());
-    }
-  };
-
-  const sendVoiceMessage = async () => {
-    const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-    const fileName = `voice_${Date.now()}.webm`;
-    
-    try {
-      // 1. Upload Audio
-      await supabase.storage.from('post_images').upload(fileName, audioBlob);
-      const { data } = supabase.storage.from('post_images').getPublicUrl(fileName);
-      const audioUrl = data.publicUrl;
-
-      // 2. Prepare Data (Group Logic Added)
-      const msgData: any = {
-        sender_id: user?.id,
-        content: 'Sent a voice message',
-        type: 'audio',
-        image_url: audioUrl,
-        created_at: new Date().toISOString()
-      };
-
-      if (isGroup) {
-        msgData.group_id = receiver.id;
-        msgData.receiver_id = null;
-      } else {
-        msgData.receiver_id = receiver.id;
-        msgData.group_id = null;
-      }
-
-      // 3. Optimistic UI
-      setMessages(prev => [...prev, msgData]);
-      scrollToBottom();
-
-      // 4. Save to DB
-      await supabase.from('messages').insert(msgData);
-
-    } catch (error) {
-      console.error('Error sending voice note:', error);
-    }
-  };
-
-  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
-      setSelectedImage(file);
-      setImagePreview(URL.createObjectURL(file));
-    }
-  };
-
-  const sendMessage = async (e?: React.FormEvent, type: string = 'text', customContent?: string) => {
+  // --- Sending Logic ---
+  const handleSendMessage = async (e?: React.FormEvent, type: string = 'text', customContent?: string, fileBlob?: Blob) => {
     e?.preventDefault();
     const content = customContent || newMessage;
-    if (!content.trim() && !selectedImage) return;
+    if (!content.trim() && !selectedImage && !fileBlob) return;
     
     setSending(true);
-    let uploadedImageUrl = null;
+    let uploadedUrl = null;
 
     try {
-        if (selectedImage) {
-            const fileName = `chat_${Date.now()}_${Math.random()}`;
-            await supabase.storage.from('post_images').upload(fileName, selectedImage); 
+        // Upload File (Image or Audio)
+        const fileToUpload = fileBlob || selectedImage;
+        if (fileToUpload) {
+            const ext = type === 'audio' ? 'webm' : 'png';
+            const fileName = `chat_${Date.now()}_${Math.random()}.${ext}`;
+            
+            const { error: upErr } = await supabase.storage.from('post_images').upload(fileName, fileToUpload);
+            if (upErr) throw upErr;
+            
             const { data } = supabase.storage.from('post_images').getPublicUrl(fileName);
-            uploadedImageUrl = data.publicUrl;
-            type = 'image';
+            uploadedUrl = data.publicUrl;
         }
 
-        const msgData: any = {
+        const msgData = {
             sender_id: user?.id,
+            receiver_id: isGroup ? null : receiver.id,
+            group_id: isGroup ? receiver.id : null,
             content: type === 'image' ? 'Sent a photo' : content,
             type: type,
-            image_url: uploadedImageUrl || (selectedImage ? imagePreview : null),
+            image_url: uploadedUrl || (selectedImage ? imagePreview : null),
             created_at: new Date().toISOString()
         };
 
-        // Handle Group vs Single
-        if (isGroup) {
-            msgData.group_id = receiver.id;
-            msgData.receiver_id = null;
-        } else {
-            msgData.receiver_id = receiver.id;
-            msgData.group_id = null;
-        }
-
-        setMessages(prev => [...prev, msgData]);
+        // Optimistic Update
+        // setMessages(prev => [...prev, msgData]); // Realtime handles this now
         scrollToBottom();
         if (type === 'text') playSound('message');
 
+        // Reset
         setNewMessage('');
         setSelectedImage(null);
         setImagePreview(null);
         setShowEmoji(false);
 
-        await supabase.from('messages').insert(msgData);
+        // DB Insert
+        const { error } = await supabase.from('messages').insert(msgData);
+        if (error) throw error;
 
     } catch (error) {
-        console.error(error);
+        console.error("Failed to send:", error);
+        alert("Message failed to send.");
     } finally {
         setSending(false);
+    }
+  };
+
+  // --- Voice Handlers ---
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      audioChunksRef.current = [];
+      recorder.ondataavailable = e => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
+      recorder.onstop = () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        handleSendMessage(undefined, 'audio', 'Sent a voice message', audioBlob);
+      };
+      recorder.start();
+      setMediaRecorder(recorder);
+      setIsRecording(true);
+    } catch (err) {
+      alert('Microphone blocked');
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorder && isRecording) {
+        mediaRecorder.stop();
+        setIsRecording(false);
+        mediaRecorder.stream.getTracks().forEach(t => t.stop());
+    }
+  };
+
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files?.[0]) {
+        const file = e.target.files[0];
+        setSelectedImage(file);
+        setImagePreview(URL.createObjectURL(file));
     }
   };
 
@@ -220,6 +186,7 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
     setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
   };
 
+  // --- Render Message ---
   const renderMessageContent = (msg: any, isMe: boolean) => {
     if (msg.type?.startsWith('call_')) {
       return (
@@ -236,8 +203,7 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
     if (msg.type === 'audio') {
       return (
         <div className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-          <div className={`px-3 py-2 rounded-2xl shadow-sm flex items-center gap-2 
-            ${isMe ? 'bg-blue-600 text-white rounded-br-none' : 'bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 border dark:border-gray-700 rounded-bl-none'}`}>
+          <div className={`px-3 py-2 rounded-2xl shadow-sm ${isMe ? 'bg-blue-600' : 'bg-white dark:bg-gray-800 border dark:border-gray-700'}`}>
             <audio controls src={msg.image_url} className="h-8 w-48" />
           </div>
         </div>
@@ -248,14 +214,8 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
       <div className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
         <div className={`max-w-[75%] rounded-2xl shadow-sm overflow-hidden 
           ${isMe ? 'bg-blue-600 text-white rounded-br-none' : 'bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 border dark:border-gray-700 rounded-bl-none'}`}>
-          
-          {msg.image_url && (
-            <img src={msg.image_url} alt="Sent" className="w-full h-auto max-h-60 object-cover" />
-          )}
-          
-          {msg.content && msg.type !== 'image' && (
-            <div className="px-4 py-2 text-sm break-words whitespace-pre-wrap">{msg.content}</div>
-          )}
+          {msg.image_url && <img src={msg.image_url} className="w-full h-auto max-h-60 object-cover" />}
+          {msg.content && msg.type !== 'image' && <div className="px-4 py-2 text-sm break-words whitespace-pre-wrap">{msg.content}</div>}
         </div>
       </div>
     );
@@ -266,7 +226,7 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
       {/* Header */}
       <div className="bg-white dark:bg-gray-900 p-3 shadow-sm flex items-center justify-between border-b dark:border-gray-800">
         <div className="flex items-center gap-3">
-            <button onClick={onBack} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full dark:text-white transition-colors"><ArrowLeft size={22} /></button>
+            <button onClick={onBack} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full dark:text-white"><ArrowLeft size={22} /></button>
             <div className="flex items-center gap-3 cursor-pointer" onClick={() => !isGroup && onViewProfile && onViewProfile(receiver.id)}>
                 <div className="relative">
                     <img src={receiver.avatar} className={`w-10 h-10 border dark:border-gray-600 object-cover ${isGroup ? 'rounded-xl' : 'rounded-full'}`} />
@@ -274,77 +234,49 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
                 </div>
                 <div>
                     <h3 className="font-bold text-sm dark:text-white">{receiver.name}</h3>
-                    <span className="text-xs text-gray-500 dark:text-gray-400">
-                        {isGroup ? 'Group Chat' : 'Active now'}
-                    </span>
+                    <span className="text-xs text-gray-500 dark:text-gray-400">{isGroup ? 'Group Chat' : 'Active now'}</span>
                 </div>
             </div>
         </div>
-        
-        {/* Call Buttons (Only for personal chat) */}
         {!isGroup && (
             <div className="flex gap-4 text-blue-600 dark:text-blue-400 pr-2">
-                <button onClick={() => onStartCall && onStartCall(false)} className="hover:bg-blue-50 dark:hover:bg-gray-800 p-2 rounded-full"><Phone size={22} /></button>
-                <button onClick={() => onStartCall && onStartCall(true)} className="hover:bg-blue-50 dark:hover:bg-gray-800 p-2 rounded-full"><Video size={24} /></button>
+                <button onClick={() => onStartCall && onStartCall(false)}><Phone size={22}/></button>
+                <button onClick={() => onStartCall && onStartCall(true)}><Video size={24}/></button>
             </div>
         )}
       </div>
 
-      {/* Messages List */}
+      {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50 dark:bg-gray-950" onClick={() => setShowEmoji(false)}>
-        {messages.map((msg, idx) => {
-            const isMe = msg.sender_id === user?.id;
-            return (
-              <React.Fragment key={idx}>
-                {renderMessageContent(msg, isMe)}
-              </React.Fragment>
-            );
-        })}
+        {messages.map((msg, idx) => (
+            <React.Fragment key={idx}>{renderMessageContent(msg, msg.sender_id === user?.id)}</React.Fragment>
+        ))}
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input Area */}
+      {/* Input */}
       <div className="p-3 bg-white dark:bg-gray-900 border-t dark:border-gray-800 relative">
         {imagePreview && (
-            <div className="absolute bottom-20 left-4 bg-white dark:bg-gray-800 p-2 rounded-xl shadow-lg border dark:border-gray-600 z-10">
-                <img src={imagePreview} className="h-24 w-auto rounded-lg object-cover" />
-                <button onClick={() => {setSelectedImage(null); setImagePreview(null);}} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 shadow-md hover:bg-red-600"><X size={14}/></button>
+            <div className="absolute bottom-20 left-4 bg-white dark:bg-gray-800 p-2 rounded-xl shadow-lg border z-10">
+                <img src={imagePreview} className="h-24 w-auto rounded-lg" />
+                <button onClick={() => {setSelectedImage(null); setImagePreview(null);}} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1"><X size={14}/></button>
             </div>
         )}
-        
-        {showEmoji && (
-            <div className="absolute bottom-20 left-0 sm:left-4 z-50 shadow-2xl rounded-2xl overflow-hidden">
-                <EmojiPicker onEmojiClick={(e) => setNewMessage(prev => prev + e.emoji)} height={350} />
-            </div>
-        )}
+        {showEmoji && <div className="absolute bottom-20 left-0 sm:left-4 z-50"><EmojiPicker onEmojiClick={(e) => setNewMessage(prev => prev + e.emoji)} height={350} /></div>}
 
-        <form onSubmit={(e) => sendMessage(e, 'text')} className="flex items-center gap-2 bg-gray-100 dark:bg-gray-800 p-1.5 rounded-3xl transition-colors border dark:border-gray-700">
-            <button type="button" onClick={() => setShowEmoji(!showEmoji)} className="p-2 text-gray-500 hover:text-yellow-500 transition-colors"><Smile size={24} /></button>
-            <button type="button" onClick={() => fileInputRef.current?.click()} className="p-2 text-gray-500 hover:text-green-500 transition-colors"><ImageIcon size={24} /></button>
-            
+        <form onSubmit={(e) => handleSendMessage(e, 'text')} className="flex items-center gap-2 bg-gray-100 dark:bg-gray-800 p-1.5 rounded-3xl border dark:border-gray-700">
+            <button type="button" onClick={() => setShowEmoji(!showEmoji)} className="p-2 text-gray-500"><Smile size={24} /></button>
+            <button type="button" onClick={() => fileInputRef.current?.click()} className="p-2 text-gray-500"><ImageIcon size={24} /></button>
             <input type="file" ref={fileInputRef} hidden accept="image/*" onChange={handleImageSelect} />
             
-            <input 
-                value={newMessage} 
-                onChange={(e) => setNewMessage(e.target.value)} 
-                placeholder={isGroup ? `Message ${receiver.name}...` : "Type a message..."} 
-                className="flex-1 bg-transparent px-2 py-2 focus:outline-none text-sm dark:text-white placeholder-gray-500 dark:placeholder-gray-400" 
-            />
+            <input value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder={isGroup ? `Message ${receiver.name}...` : "Type a message..."} className="flex-1 bg-transparent px-2 py-2 focus:outline-none text-sm dark:text-white" />
             
-            {/* Mic / Send Button */}
             {newMessage.trim() || selectedImage ? (
-                <button type="submit" disabled={sending} className="p-2 bg-blue-600 text-white rounded-full hover:bg-blue-700 active:scale-95 flex justify-center w-10 h-10 shadow-md transition-all">
+                <button type="submit" disabled={sending} className="p-2 bg-blue-600 text-white rounded-full flex justify-center w-10 h-10 shadow-md">
                     {sending ? <Loader2 size={18} className="animate-spin"/> : <Send size={18} />}
                 </button>
             ) : (
-                <button 
-                    type="button" 
-                    onMouseDown={startRecording}
-                    onMouseUp={stopRecording}
-                    onTouchStart={startRecording}
-                    onTouchEnd={stopRecording}
-                    className={`p-2 rounded-full text-white w-10 h-10 flex justify-center items-center shadow-md transition-all ${isRecording ? 'bg-red-500 scale-110 animate-pulse' : 'bg-blue-600 hover:bg-blue-700'}`}
-                >
+                <button type="button" onMouseDown={startRecording} onMouseUp={stopRecording} onTouchStart={startRecording} onTouchEnd={stopRecording} className={`p-2 rounded-full text-white w-10 h-10 flex justify-center items-center ${isRecording ? 'bg-red-500 animate-pulse' : 'bg-blue-600'}`}>
                     {isRecording ? <StopCircle size={20} /> : <Mic size={20} />}
                 </button>
             )}

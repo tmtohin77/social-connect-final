@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
-import { Search, MessageCircle, UserX, Loader2, Users, Plus } from 'lucide-react';
+import { Search, UserX, Loader2, Users } from 'lucide-react';
 import CreateGroupModal from './CreateGroupModal';
 
 interface ChatListProps {
