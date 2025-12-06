@@ -12,6 +12,7 @@ interface User {
 interface AuthContextType {
   user: User | null;
   loading: boolean;
+  onlineUsers: Set<string>; // ✅ নতুন স্টেট (অনলাইন ইউজারদের আইডি)
   login: (email: string, password: string) => Promise<{ error: any }>;
   register: (data: any) => Promise<{ error: any }>;
   verifyEmail: (email: string, token: string) => Promise<{ error: any }>;
@@ -23,18 +24,24 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [onlineUsers, setOnlineUsers] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    // 1. Check current session
+    // সেশন চেক করা
     supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) fetchProfile(session.user.id, session.user.email!);
-      else setLoading(false);
+      if (session?.user) {
+        fetchProfile(session.user.id, session.user.email!);
+        setupPresence(session.user.id); // ✅ অনলাইন স্ট্যাটাস চালু
+      } else {
+        setLoading(false);
+      }
     });
 
-    // 2. Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session?.user) fetchProfile(session.user.id, session.user.email!);
-      else {
+      if (session?.user) {
+        fetchProfile(session.user.id, session.user.email!);
+        setupPresence(session.user.id);
+      } else {
         setUser(null);
         setLoading(false);
       }
@@ -43,13 +50,30 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return () => subscription.unsubscribe();
   }, []);
 
+  // ✅ রিয়েল-টাইম অনলাইন স্ট্যাটাস সেটআপ
+  const setupPresence = (userId: string) => {
+    const room = supabase.channel('online-users', {
+      config: { presence: { key: userId } },
+    });
+
+    room
+      .on('presence', { event: 'sync' }, () => {
+        const newState = room.presenceState();
+        const onlineIds = new Set(Object.keys(newState));
+        setOnlineUsers(onlineIds);
+      })
+      .subscribe(async (status) => {
+        if (status === 'SUBSCRIBED') {
+          await room.track({ online_at: new Date().toISOString() });
+        }
+      });
+  };
+
   const fetchProfile = async (id: string, email: string) => {
-    // Fetch user profile from 'users' table
     const { data } = await supabase.from('users').select('*').eq('id', id).single();
     if (data) {
       setUser(data);
     } else {
-      // Temporary fallback (if trigger hasn't run yet)
       setUser({ id, email, name: email.split('@')[0], avatar: avatars.men[0] });
     }
     setLoading(false);
@@ -60,7 +84,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const register = async (formData: any) => {
-    // Send metadata so Trigger can create profile automatically
     return await supabase.auth.signUp({
       email: formData.contact,
       password: formData.password,
@@ -75,26 +98,23 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const verifyEmail = async (email: string, token: string) => {
-    // Try verifying with 'email' type first (Standard)
     let { data, error } = await supabase.auth.verifyOtp({ email, token, type: 'email' });
-    
-    // If fails, try 'signup' type
     if (error) {
        const retry = await supabase.auth.verifyOtp({ email, token, type: 'signup' });
        data = retry.data; 
        error = retry.error;
     }
-    
     if (data.session?.user) await fetchProfile(data.session.user.id, email);
     return { error };
   };
 
   const logout = async () => {
     await supabase.auth.signOut();
+    supabase.removeAllChannels(); // সব চ্যানেল বন্ধ করো
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, verifyEmail, logout }}>
+    <AuthContext.Provider value={{ user, loading, onlineUsers, login, register, verifyEmail, logout }}>
       {children}
     </AuthContext.Provider>
   );
