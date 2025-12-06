@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import PostCard from '../components/ui/PostCard';
@@ -6,13 +6,20 @@ import CreatePost from '../components/home/CreatePost';
 import StoryCircle from '../components/home/StoryCircle';
 import CommentModal from '../components/home/CommentModal';
 import NotificationsModal from '../components/notifications/NotificationsModal';
-import { Loader2, Bell, MessageCircle, X } from 'lucide-react';
+import { Loader2, Bell, MessageCircle, X, Eye } from 'lucide-react';
 import { appLogo } from '../data/mockData';
 
-// ✅ ইন্টারফেস আপডেট করা হলো
 interface HomeScreenProps {
   onOpenChat: () => void;
   onViewProfile?: (userId: string) => void;
+}
+
+// Story Viewer Interface
+interface StoryViewData {
+  id: string;
+  url: string;
+  isMine: boolean;
+  userId: string;
 }
 
 const HomeScreen: React.FC<HomeScreenProps> = ({ onOpenChat, onViewProfile }) => {
@@ -22,12 +29,17 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onOpenChat, onViewProfile }) =>
   const [loading, setLoading] = useState(true);
   const [uploadingStory, setUploadingStory] = useState(false);
   
+  // Modals States
   const [showComments, setShowComments] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [selectedPostId, setSelectedPostId] = useState('');
-  const [viewStory, setViewStory] = useState<string | null>(null);
+  
+  // Story View States
+  const [viewStory, setViewStory] = useState<StoryViewData | null>(null);
+  const [viewers, setViewers] = useState<any[]>([]);
+  const [showViewersModal, setShowViewersModal] = useState(false);
 
-  const storyInputRef = React.useRef<HTMLInputElement>(null);
+  const storyInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     fetchPosts();
@@ -67,6 +79,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onOpenChat, onViewProfile }) =>
     }
   };
 
+  // Story Upload Logic
   const handleStoryUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || !e.target.files[0]) return;
     setUploadingStory(true);
@@ -89,6 +102,37 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onOpenChat, onViewProfile }) =>
     } finally {
       setUploadingStory(false);
     }
+  };
+
+  // Story View Logic
+  const handleViewStory = async (story: any) => {
+    const isMine = story.user_id === user?.id;
+    setViewStory({
+        id: story.id,
+        url: story.image_url,
+        isMine,
+        userId: story.user_id
+    });
+
+    if (!isMine) {
+        // Record View
+        await supabase.from('story_views').insert({
+            story_id: story.id,
+            viewer_id: user?.id
+        }).select();
+    } else {
+        // Fetch My Viewers
+        fetchStoryViewers(story.id);
+    }
+  };
+
+  const fetchStoryViewers = async (storyId: string) => {
+    const { data } = await supabase
+        .from('story_views')
+        .select('*, viewer:viewer_id(name, avatar)')
+        .eq('story_id', storyId);
+    
+    if (data) setViewers(data);
   };
 
   const openCommentModal = (postId: string) => {
@@ -118,6 +162,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onOpenChat, onViewProfile }) =>
       <div className="max-w-xl mx-auto">
         {/* Stories Section */}
         <div className="bg-white dark:bg-gray-800 py-4 border-b border-gray-100 dark:border-gray-700 mb-4 overflow-x-auto no-scrollbar flex gap-4 px-4 transition-colors">
+            {/* My Story Upload */}
             <div className="relative">
                 <StoryCircle 
                     user={{ name: "You", avatar: user?.avatar || "" }} 
@@ -132,15 +177,22 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onOpenChat, onViewProfile }) =>
                 )}
             </div>
             
+            {/* Friends' Stories */}
             {stories.map((story) => (
-                <StoryCircle key={story.id} user={story.users} onClick={() => setViewStory(story.image_url)} />
+                <StoryCircle 
+                    key={story.id} 
+                    user={story.users} 
+                    onClick={() => handleViewStory(story)} 
+                />
             ))}
         </div>
 
+        {/* Create Post */}
         <div className="px-4">
             <CreatePost onPostCreated={fetchPosts} />
         </div>
 
+        {/* Feed Section */}
         <div className="px-4 mt-2">
             {loading ? (
                 <div className="flex justify-center py-12"><Loader2 className="animate-spin text-blue-600" size={32} /></div>
@@ -155,21 +207,59 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onOpenChat, onViewProfile }) =>
                         key={post.id} 
                         post={post} 
                         onCommentClick={openCommentModal} 
-                        onDelete={fetchPosts}
-                        onProfileClick={onViewProfile} // ✅ প্রপস পাস করা হলো
+                        onDelete={fetchPosts} 
+                        onProfileClick={onViewProfile}
                     />
                 ))
             )}
         </div>
       </div>
 
+      {/* Modals */}
       <CommentModal isOpen={showComments} onClose={() => setShowComments(false)} postId={selectedPostId} />
       <NotificationsModal isOpen={showNotifications} onClose={() => setShowNotifications(false)} />
 
+      {/* Story Viewer Overlay */}
       {viewStory && (
-        <div className="fixed inset-0 z-[70] bg-black flex items-center justify-center" onClick={() => setViewStory(null)}>
-            <img src={viewStory} className="max-h-full max-w-full object-contain" />
-            <button className="absolute top-4 right-4 text-white p-2 bg-white/20 rounded-full"><X size={24} /></button>
+        <div className="fixed inset-0 z-[70] bg-black flex flex-col items-center justify-center">
+            <button 
+                className="absolute top-4 right-4 text-white p-2 bg-white/20 rounded-full z-50 hover:bg-white/30" 
+                onClick={() => { setViewStory(null); setShowViewersModal(false); }}
+            >
+                <X size={24} />
+            </button>
+
+            <img src={viewStory.url} className="max-h-[85vh] max-w-full object-contain rounded-lg shadow-2xl" />
+
+            {/* Viewers Eye Icon (Only for My Story) */}
+            {viewStory.isMine && (
+                <div className="absolute bottom-10 flex flex-col items-center z-50" onClick={() => setShowViewersModal(true)}>
+                    <div className="flex items-center gap-2 text-white bg-black/50 backdrop-blur-md px-4 py-2 rounded-full cursor-pointer hover:bg-black/70 transition border border-white/20">
+                        <Eye size={20} />
+                        <span className="font-bold">{viewers.length} Views</span>
+                    </div>
+                </div>
+            )}
+
+            {/* Viewers List Modal */}
+            {showViewersModal && (
+                <div className="absolute bottom-0 w-full max-w-md bg-white dark:bg-gray-800 rounded-t-3xl h-[50vh] transition-transform duration-300 animate-slide-up z-[80]">
+                    <div className="p-4 border-b dark:border-gray-700 flex justify-between items-center">
+                        <h3 className="font-bold text-gray-800 dark:text-white">Story Views ({viewers.length})</h3>
+                        <button onClick={(e) => { e.stopPropagation(); setShowViewersModal(false); }} className="dark:text-white"><X size={20}/></button>
+                    </div>
+                    <div className="p-4 overflow-y-auto h-full pb-20">
+                        {viewers.length === 0 ? <p className="text-gray-500 text-center mt-10">No views yet.</p> : 
+                            viewers.map(v => (
+                            <div key={v.id} className="flex items-center gap-3 mb-4 p-2 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-xl">
+                                <img src={v.viewer.avatar} className="w-10 h-10 rounded-full border object-cover"/>
+                                <span className="font-bold text-gray-800 dark:text-white">{v.viewer.name}</span>
+                            </div>
+                            ))
+                        }
+                    </div>
+                </div>
+            )}
         </div>
       )}
     </div>

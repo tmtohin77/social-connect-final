@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Heart, MessageCircle, Share2, MoreHorizontal, Bookmark, Trash2, Copy, X } from 'lucide-react';
+import { Heart, MessageCircle, Share2, MoreHorizontal, Bookmark, Trash2, X } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
-import ShareModal from '../home/ShareModal';
+// ShareModal যদি না থাকে তবে নিচের ইমপোর্ট লাইনটা কমেন্ট করে রেখো
+// import ShareModal from '../home/ShareModal'; 
 
 interface PostCardProps {
   post: any;
@@ -20,7 +21,6 @@ const PostCard: React.FC<PostCardProps> = ({ post, onCommentClick, onProfileClic
   const [showMenu, setShowMenu] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
 
-  // যদি এটা শেয়ার করা পোস্ট হয়, তাহলে আসল কন্টেন্ট সেট করো
   const isShared = !!post.original_post;
   const displayPost = isShared ? post.original_post : post;
 
@@ -51,7 +51,6 @@ const PostCard: React.FC<PostCardProps> = ({ post, onCommentClick, onProfileClic
     setShowMenu(false);
   };
 
-  // শেয়ারড পোস্টের ভিতরের ডিজাইন (Nested Post)
   const SharedContent = () => (
     <div className="mt-2 mx-3 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden bg-white dark:bg-gray-900">
       <div className="p-3 flex items-center gap-2 border-b border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50">
@@ -71,7 +70,7 @@ const PostCard: React.FC<PostCardProps> = ({ post, onCommentClick, onProfileClic
   return (
     <div className="bg-white dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700 sm:rounded-xl sm:border sm:shadow-sm mb-4 transition-colors duration-300 relative pt-1">
       
-      {/* Header (যে পোস্ট শেয়ার করেছে তার নাম) */}
+      {/* Header */}
       <div className="p-3 flex items-center justify-between">
         <div className="flex items-center gap-3 cursor-pointer" onClick={() => onProfileClick && onProfileClick(post.user_id)}>
           <div className="bg-gradient-to-tr from-blue-500 to-purple-600 p-[2px] rounded-full">
@@ -100,14 +99,13 @@ const PostCard: React.FC<PostCardProps> = ({ post, onCommentClick, onProfileClic
         </div>
       </div>
 
-      {/* Main Content (ক্যাপশন) */}
+      {/* Main Content */}
       {post.content && !isShared && (
         <p className="px-4 pb-3 text-gray-800 dark:text-gray-200 text-sm leading-relaxed whitespace-pre-wrap break-words">{post.content}</p>
       )}
       
-      {/* শেয়ার করা হলে এখানে ক্যাপশন */}
       {isShared && post.content && (
-         <p className="px-4 pb-2 text-gray-800 dark:text-gray-200 text-sm">{post.content}</p>
+         <p className="px-4 pb-2 text-gray-800 dark:text-gray-200 text-sm whitespace-pre-wrap break-words">{post.content}</p>
       )}
 
       {/* Media / Shared Post */}
@@ -129,8 +127,9 @@ const PostCard: React.FC<PostCardProps> = ({ post, onCommentClick, onProfileClic
         </div>
         <p className="font-bold text-sm text-gray-900 dark:text-white">{likeCount} likes</p>
       </div>
-
-      <ShareModal isOpen={showShareModal} onClose={() => setShowShareModal(false)} post={post} />
+      
+      {/* Share Modal - Uncomment if you have the file */}
+      {/* <ShareModal isOpen={showShareModal} onClose={() => setShowShareModal(false)} post={post} /> */}
     </div>
   );
 };

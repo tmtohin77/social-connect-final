@@ -1,13 +1,16 @@
-// সাউন্ড প্লে করার হেল্পার ফাংশন
-export const playSound = (type: 'message' | 'calling' | 'incoming') => {
-  const sounds = {
-    message: 'https://cdn.pixabay.com/audio/2022/10/30/audio_50239f60f6.mp3', // Pop sound
-    calling: 'https://cdn.pixabay.com/audio/2024/05/17/audio_f62b160233.mp3', // Trring Trring
-    incoming: 'https://cdn.pixabay.com/audio/2021/08/11/audio_c97693e29e.mp3', // Ringtone
-  };
+export const playSound = (type: 'calling' | 'incoming') => {
+  const audio = new Audio();
+  
+  if (type === 'calling') {
+    // আউটগোয়িং কল রিংটোন
+    audio.src = 'https://actions.google.com/sounds/v1/telephony/phone_dialing.ogg';
+    audio.loop = true;
+  } else if (type === 'incoming') {
+    // ইনকামিং কল রিংটোন
+    audio.src = 'https://actions.google.com/sounds/v1/alarms/digital_watch_alarm_long.ogg';
+    audio.loop = true;
+  }
 
-  const audio = new Audio(sounds[type]);
-  audio.loop = type === 'calling' || type === 'incoming'; // কলিং হলে বাজতেই থাকবে
-  audio.play().catch(e => console.log("Audio play failed:", e));
-  return audio; // অডিও অবজেক্ট ফেরত দেব যাতে পরে বন্ধ করা যায়
+  audio.play().catch(error => console.log("Audio play failed:", error));
+  return audio;
 };

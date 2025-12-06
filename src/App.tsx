@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { supabase } from './lib/supabase'; // Import Supabase
 import { AuthProvider, useAuth } from './context/AuthContext';
 import LoginScreen from './components/auth/LoginScreen';
 import RegisterScreen from './components/auth/RegisterScreen';
@@ -13,7 +14,7 @@ import CallOverlay from './components/messenger/CallOverlay';
 import IncomingCallOverlay from './components/messenger/IncomingCallOverlay';
 import { appLogo } from './data/mockData';
 import { Home, Search, User, Menu } from 'lucide-react';
-import { playSound } from './lib/sounds'; // ✅ সাউন্ড ইমপোর্ট
+import { playSound } from './lib/sounds';
 
 const WelcomeScreen = ({ onLogin, onRegister }: any) => (
   <div className="min-h-screen bg-gradient-to-br from-blue-600 to-purple-600 flex flex-col items-center justify-center p-6 text-white text-center">
@@ -42,7 +43,9 @@ const AppContent = () => {
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [isVideoCall, setIsVideoCall] = useState(true);
   
-  // ✅ সাউন্ড কন্ট্রোল রেফারেন্স
+  // Call History States
+  const callStartTime = useRef<number | null>(null);
+  const currentCallerId = useRef<string | null>(null); // রিসিভারের আইডি
   const ringtoneRef = useRef<HTMLAudioElement | null>(null);
 
   // 1. ইনকামিং কল লিসেনার
@@ -50,9 +53,7 @@ const AppContent = () => {
     if (!peer) return;
 
     peer.on('call', (call) => {
-      // রিংটোন বাজাও
       ringtoneRef.current = playSound('incoming');
-      
       setIncomingCall({
         call,
         callerId: call.peer,
@@ -64,9 +65,9 @@ const AppContent = () => {
     return () => { peer.off('call'); };
   }, [peer]);
 
-  // 2. কল রিসিভ করা (Answer)
+  // 2. কল রিসিভ করা
   const answerCall = async () => {
-    if (ringtoneRef.current) { ringtoneRef.current.pause(); ringtoneRef.current = null; } // রিং থামাও
+    if (ringtoneRef.current) { ringtoneRef.current.pause(); ringtoneRef.current = null; }
     if (!incomingCall) return;
     
     try {
@@ -76,18 +77,16 @@ const AppContent = () => {
 
       incomingCall.call.answer(stream);
       
+      // কল শুরু হওয়ার সময় নোট করো
+      callStartTime.current = Date.now();
+      currentCallerId.current = incomingCall.callerId;
+
       incomingCall.call.on('stream', (remoteStream: MediaStream) => {
         setRemoteStream(remoteStream);
       });
 
-      // ✅ দুই পাশেই কল কাটার জন্য লিসেনার
-      incomingCall.call.on('close', () => {
-        endCallLogic();
-      });
-
-      incomingCall.call.on('error', () => {
-        endCallLogic();
-      });
+      incomingCall.call.on('close', endCallLogic);
+      incomingCall.call.on('error', endCallLogic);
 
       setActiveCall(incomingCall.call);
       setIncomingCall(null);
@@ -97,12 +96,10 @@ const AppContent = () => {
     }
   };
 
-  // 3. কল করা (Start Call)
+  // 3. কল করা
   const startCall = async (receiverId: string, isVideo: boolean) => {
     if (!peer) return;
     setIsVideoCall(isVideo);
-    
-    // ডায়াল টোন (Calling sound)
     ringtoneRef.current = playSound('calling');
 
     try {
@@ -113,19 +110,17 @@ const AppContent = () => {
         metadata: { isVideo, callerName: user?.name }
       });
 
+      // কল শুরু হওয়ার সময় এবং রিসিভার আইডি নোট করো
+      callStartTime.current = Date.now();
+      currentCallerId.current = receiverId;
+
       call.on('stream', (remoteStream: MediaStream) => {
-        // কানেক্ট হলে রিংটোন বন্ধ
         if (ringtoneRef.current) { ringtoneRef.current.pause(); ringtoneRef.current = null; }
         setRemoteStream(remoteStream);
       });
 
-      call.on('close', () => {
-        endCallLogic();
-      });
-
-      call.on('error', () => {
-        endCallLogic();
-      });
+      call.on('close', endCallLogic);
+      call.on('error', endCallLogic);
 
       setActiveCall(call);
     } catch (err) {
@@ -135,14 +130,31 @@ const AppContent = () => {
     }
   };
 
-  // 4. কল কেটে দেওয়া (লজিক ফিক্সড)
-  const endCallLogic = () => {
-    if (ringtoneRef.current) { ringtoneRef.current.pause(); ringtoneRef.current = null; } // সাউন্ড বন্ধ
+  // 4. কল কেটে দেওয়া এবং হিস্টরি সেভ করা (✅ Updated)
+  const endCallLogic = async () => {
+    if (ringtoneRef.current) { ringtoneRef.current.pause(); ringtoneRef.current = null; }
     
     if (activeCall) activeCall.close();
     if (incomingCall && incomingCall.call) incomingCall.call.close();
-
     if (myStream) myStream.getTracks().forEach(track => track.stop());
+
+    // ✅ কল হিস্টরি সেভ করা
+    if (callStartTime.current && currentCallerId.current && user) {
+        const duration = Math.floor((Date.now() - callStartTime.current) / 1000); // সেকেন্ডে
+        
+        // শুধুমাত্র যদি কল রিসিভ হয়ে থাকে (duration > 0)
+        if (duration > 0) {
+            await supabase.from('calls').insert({
+                caller_id: user.id, // যে রেকর্ড করছে
+                receiver_id: currentCallerId.current,
+                type: isVideoCall ? 'video' : 'audio',
+                duration: duration
+            });
+        }
+        // রিসেট
+        callStartTime.current = null;
+        currentCallerId.current = null;
+    }
     
     setActiveCall(null);
     setIncomingCall(null);
@@ -150,10 +162,8 @@ const AppContent = () => {
     setRemoteStream(null);
   };
 
-  // ইউজার ম্যানুয়ালি কল কাটলে
   const handleManualEndCall = () => {
-    endCallLogic(); // নিজের সাইডে বন্ধ করো
-    // PeerJS অটোমেটিক অন্য সাইডে 'close' ইভেন্ট পাঠায়
+    endCallLogic();
   };
 
   if (loading) return <div className="h-screen flex items-center justify-center dark:bg-gray-900">Loading...</div>;
@@ -186,7 +196,6 @@ const AppContent = () => {
         );
     }
 
-    // Normal Screens (Same as before)
     if (selectedChatUser) {
         return (
             <ChatRoomScreen 
@@ -218,13 +227,12 @@ const AppContent = () => {
         {appView === 'chat' && (
             <div className="relative h-screen bg-white dark:bg-gray-900">
                 <div className="absolute top-4 left-4 z-20">
-                    <button onClick={() => setAppView('home')} className="bg-gray-100 dark:bg-gray-800 dark:text-white p-2 rounded-full text-xs shadow-md">Back</button>
+                    <button onClick={() => setAppView('home')} className="bg-gray-100 dark:bg-gray-800 dark:text-white p-2 rounded-full font-bold text-xs shadow-md">Back</button>
                 </div>
                 <ChatListScreen onSelectUser={setSelectedChatUser} />
             </div>
         )}
 
-        {/* Global Bottom Navigation */}
         {appView !== 'chat' && (
             <div className="fixed bottom-0 w-full bg-white dark:bg-gray-900 border-t border-gray-100 dark:border-gray-800 p-2 pb-3 flex justify-around z-50 shadow transition-colors duration-300">
                 <button onClick={() => setAppView('home')} className={`p-2 rounded-xl flex flex-col items-center gap-1 ${appView === 'home' ? 'text-blue-600 dark:text-blue-400' : 'text-gray-400'}`}><Home size={24}/><span className="text-[10px] font-bold">Home</span></button>
