@@ -8,7 +8,8 @@ import ProfileScreen from './pages/Profile';
 import UserProfile from './pages/UserProfile';
 import MenuScreen from './components/menu/MenuScreen';
 import SearchScreen from './components/shared/SearchScreen';
-import SettingsScreen from './pages/SettingsScreen'; // ✅ ইমপোর্ট করা হয়েছে
+import SettingsScreen from './pages/SettingsScreen';
+import FriendsScreen from './components/friends/FriendsScreen'; // ✅ Import Fixed
 import ChatListScreen from './components/messenger/ChatListScreen';
 import ChatRoomScreen from './components/messenger/ChatRoomScreen';
 import CallOverlay from './components/messenger/CallOverlay';
@@ -33,14 +34,10 @@ const WelcomeScreen = ({ onLogin, onRegister }: any) => (
 const AppContent = () => {
   const { user, loading, peer } = useAuth();
   const [authView, setAuthView] = useState<'welcome' | 'login' | 'register'>('welcome');
-  
-  // ✅ Settings যোগ করা হয়েছে
   const [appView, setAppView] = useState<'home' | 'search' | 'profile' | 'menu' | 'chat' | 'friends' | 'settings'>('home');
-  
   const [selectedChatUser, setSelectedChatUser] = useState<any>(null);
   const [viewProfileId, setViewProfileId] = useState<string | null>(null);
 
-  // Call States
   const [incomingCall, setIncomingCall] = useState<any>(null);
   const [activeCall, setActiveCall] = useState<any>(null);
   const [myStream, setMyStream] = useState<MediaStream | null>(null);
@@ -115,15 +112,36 @@ const AppContent = () => {
 
     if (callStartTime.current && currentCallerId.current && user) {
         const duration = Math.floor((Date.now() - callStartTime.current) / 1000);
+        
+        // কল টাইপ লজিক
+        let callType = 'missed';
         if (duration > 0) {
-            await supabase.from('calls').insert({
-                caller_id: user.id, receiver_id: currentCallerId.current,
-                type: isVideoCall ? 'video' : 'audio', duration: duration
-            });
+            callType = isVideoCall ? 'video_ended' : 'audio_ended';
         }
+
+        await supabase.from('calls').insert({
+            caller_id: user.id, receiver_id: currentCallerId.current,
+            type: callType, duration: duration
+        });
+
+        // চ্যাট মেসেজ হিসেবেও সেভ করা (যাতে চ্যাটে দেখা যায়)
+        await supabase.from('messages').insert({
+            sender_id: user.id,
+            receiver_id: currentCallerId.current,
+            content: callType === 'missed' ? 'Missed call' : `Call ended (${Math.floor(duration/60)}m ${duration%60}s)`,
+            type: `call_${isVideoCall ? 'video' : 'audio'}`,
+            created_at: new Date().toISOString()
+        });
+
         callStartTime.current = null; currentCallerId.current = null;
     }
     setActiveCall(null); setIncomingCall(null); setMyStream(null); setRemoteStream(null);
+  };
+
+  // ✅ Profile Navigation Helper
+  const handleViewProfile = (userId: string) => {
+    if (userId === user?.id) setAppView('profile');
+    else setViewProfileId(userId);
   };
 
   if (loading) return <div className="h-screen flex items-center justify-center dark:bg-gray-900">Loading...</div>;
@@ -132,24 +150,20 @@ const AppContent = () => {
     if (incomingCall) return <IncomingCallOverlay callerName={incomingCall.callerName} isVideo={incomingCall.isVideo} onAccept={answerCall} onReject={() => { if (ringtoneRef.current) { ringtoneRef.current.pause(); ringtoneRef.current = null; } incomingCall.call.close(); setIncomingCall(null); }} />;
     if (activeCall) return <CallOverlay stream={myStream} remoteStream={remoteStream} onEndCall={endCallLogic} isVideo={isVideoCall} callerName={selectedChatUser?.name || "Friend"} />;
     
-    if (selectedChatUser) return <ChatRoomScreen receiver={selectedChatUser} onBack={() => setSelectedChatUser(null)} onViewProfile={(id) => { setSelectedChatUser(null); setViewProfileId(id); }} onStartCall={(video) => startCall(selectedChatUser.id, video)} />;
+    if (selectedChatUser) return <ChatRoomScreen receiver={selectedChatUser} onBack={() => setSelectedChatUser(null)} onViewProfile={(id) => { setSelectedChatUser(null); handleViewProfile(id); }} onStartCall={(video) => startCall(selectedChatUser.id, video)} />;
     
     if (viewProfileId) return <UserProfile userId={viewProfileId} onBack={() => setViewProfileId(null)} onMessage={(u) => { setViewProfileId(null); setSelectedChatUser(u); }} />;
 
     return (
       <div className="dark:bg-gray-900 min-h-screen transition-colors duration-300">
-        {appView === 'home' && <HomeScreen onOpenChat={() => setAppView('chat')} onViewProfile={(id) => setViewProfileId(id)} />}
+        {appView === 'home' && <HomeScreen onOpenChat={() => setAppView('chat')} onViewProfile={handleViewProfile} />}
         {appView === 'profile' && <ProfileScreen onBack={() => setAppView('home')} />}
-        
-        {/* ✅ Menu Screen with Navigation Prop */}
-        {appView === 'menu' && <MenuScreen onNavigate={(view) => setAppView(view as any)} />}
-        
-        {appView === 'search' && <SearchScreen />}
-        
-        {/* ✅ Settings Screen Added */}
+        {appView === 'menu' && <MenuScreen onNavigate={(view) => setAppView(view as any)} onViewProfile={() => setAppView('profile')} />}
+        {appView === 'search' && <SearchScreen onViewProfile={handleViewProfile} />}
         {appView === 'settings' && <SettingsScreen onBack={() => setAppView('menu')} />}
         
-        {appView === 'friends' && <div className="text-center pt-20">Friends Screen Loading...</div>} {/* Placeholder, import FriendsScreen if needed */}
+        {/* ✅ Friends Screen Connected */}
+        {appView === 'friends' && <FriendsScreen onViewProfile={handleViewProfile} />}
 
         {appView === 'chat' && (
             <div className="relative h-screen bg-white dark:bg-gray-900">

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { X, Heart, MessageCircle, UserPlus, Loader2, Check, UserX } from 'lucide-react';
+import { X, Heart, MessageCircle, UserPlus, Loader2 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
 import { formatDistanceToNow } from 'date-fns';
@@ -7,17 +7,17 @@ import { formatDistanceToNow } from 'date-fns';
 interface NotificationsModalProps {
   isOpen: boolean;
   onClose: () => void;
+  // ✅ Navigation Prop Added
+  onNavigate?: (type: 'profile' | 'post', id: string) => void;
 }
 
-const NotificationsModal: React.FC<NotificationsModalProps> = ({ isOpen, onClose }) => {
+const NotificationsModal: React.FC<NotificationsModalProps> = ({ isOpen, onClose, onNavigate }) => {
   const { user } = useAuth();
   const [notifications, setNotifications] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (isOpen && user) {
-      fetchNotifications();
-    }
+    if (isOpen && user) fetchNotifications();
   }, [isOpen, user]);
 
   const fetchNotifications = async () => {
@@ -33,31 +33,32 @@ const NotificationsModal: React.FC<NotificationsModalProps> = ({ isOpen, onClose
   };
 
   const handleAcceptRequest = async (senderId: string, notifId: string) => {
-    // ১. ফ্রেন্ডশিপ স্ট্যাটাস আপডেট করো
-    await supabase
-      .from('friendships')
-      .update({ status: 'accepted' })
-      .eq('requester_id', senderId)
-      .eq('receiver_id', user?.id);
-
-    // ২. নোটিফিকেশন রিমুভ করো বা আপডেট করো
+    await supabase.from('friendships').update({ status: 'accepted' }).eq('requester_id', senderId).eq('receiver_id', user?.id);
     await supabase.from('notifications').delete().eq('id', notifId);
-    
-    // UI Update
     setNotifications(prev => prev.filter(n => n.id !== notifId));
-    alert("Friend request accepted! You can now chat.");
+    alert("Friend request accepted!");
   };
 
   const handleDeleteRequest = async (senderId: string, notifId: string) => {
-    // রিকোয়েস্ট ডিলিট করা
-    await supabase
-      .from('friendships')
-      .delete()
-      .eq('requester_id', senderId)
-      .eq('receiver_id', user?.id);
-
+    await supabase.from('friendships').delete().eq('requester_id', senderId).eq('receiver_id', user?.id);
     await supabase.from('notifications').delete().eq('id', notifId);
     setNotifications(prev => prev.filter(n => n.id !== notifId));
+  };
+
+  const handleNotificationClick = (n: any) => {
+    // যদি ফ্রেন্ড রিকোয়েস্ট অ্যাকশন হয়, তাহলে নেভিগেট করো না (বাটনে ক্লিক করবে)
+    if (n.type === 'friend_request') return;
+
+    onClose(); // Close Modal
+    if (onNavigate) {
+        if (n.type === 'like' || n.type === 'comment') {
+            // Post logic here (future)
+            // onNavigate('post', n.post_id);
+        } else {
+            // Profile Navigation
+            onNavigate('profile', n.sender_id);
+        }
+    }
   };
 
   if (!isOpen) return null;
@@ -77,7 +78,11 @@ const NotificationsModal: React.FC<NotificationsModalProps> = ({ isOpen, onClose
             <div className="text-center mt-20 text-gray-500 dark:text-gray-400">No notifications yet.</div>
           ) : (
             notifications.map((n) => (
-              <div key={n.id} className="flex flex-col gap-2 p-3 hover:bg-blue-50 dark:hover:bg-gray-700 rounded-xl transition-colors mb-1">
+              <div 
+                key={n.id} 
+                onClick={() => handleNotificationClick(n)}
+                className="flex flex-col gap-2 p-3 hover:bg-blue-50 dark:hover:bg-gray-700 rounded-xl transition-colors mb-1 cursor-pointer"
+              >
                 <div className="flex items-center gap-3">
                   <div className="relative">
                     <img src={n.sender?.avatar} className="w-12 h-12 rounded-full border object-cover" />
@@ -98,9 +103,9 @@ const NotificationsModal: React.FC<NotificationsModalProps> = ({ isOpen, onClose
                   </div>
                 </div>
 
-                {/* Friend Request Actions */}
+                {/* Friend Request Actions (Only show buttons here) */}
                 {n.type === 'friend_request' && (
-                  <div className="flex gap-2 ml-14">
+                  <div className="flex gap-2 ml-14" onClick={(e) => e.stopPropagation()}> 
                     <button onClick={() => handleAcceptRequest(n.sender_id, n.id)} className="flex-1 bg-blue-600 text-white py-1.5 rounded-lg text-sm font-bold hover:bg-blue-700">Confirm</button>
                     <button onClick={() => handleDeleteRequest(n.sender_id, n.id)} className="flex-1 bg-gray-200 text-gray-700 py-1.5 rounded-lg text-sm font-bold hover:bg-gray-300">Delete</button>
                   </div>

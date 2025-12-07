@@ -2,12 +2,12 @@ import React, { useEffect, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { Settings, Moon, LogOut, ChevronRight, HelpCircle, Sun } from 'lucide-react';
 
-// ১. ইন্টারফেস যোগ করা হয়েছে
 interface MenuProps {
   onNavigate: (view: string) => void;
+  onViewProfile?: () => void; // ✅ Optional করা হয়েছে যাতে এরর না দেয়
 }
 
-const MenuScreen: React.FC<MenuProps> = ({ onNavigate }) => {
+const MenuScreen: React.FC<MenuProps> = ({ onNavigate, onViewProfile }) => {
   const { user, logout } = useAuth();
   const [isDark, setIsDark] = useState(false);
 
@@ -34,7 +34,7 @@ const MenuScreen: React.FC<MenuProps> = ({ onNavigate }) => {
     { 
       icon: <Settings size={22} />, 
       label: 'Settings & Privacy',
-      action: () => onNavigate('settings') // ✅ Action: সেটিংসে যাও
+      action: () => onNavigate('settings') 
     },
     { 
       icon: isDark ? <Sun size={22} /> : <Moon size={22} />, 
@@ -50,7 +50,10 @@ const MenuScreen: React.FC<MenuProps> = ({ onNavigate }) => {
       {/* Profile Card */}
       <div className="bg-white dark:bg-gray-800 p-4 mb-2 shadow-sm">
         <h1 className="text-2xl font-bold mb-4 px-2 dark:text-white">Menu</h1>
-        <div className="flex items-center gap-4 p-3 bg-gray-50 dark:bg-gray-700 rounded-xl shadow-sm border border-gray-100 dark:border-gray-600">
+        <div 
+            onClick={onViewProfile} 
+            className="flex items-center gap-4 p-3 bg-gray-50 dark:bg-gray-700 rounded-xl shadow-sm border border-gray-100 dark:border-gray-600 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600 transition"
+        >
           <img src={user?.avatar} alt="Profile" className="w-14 h-14 rounded-full border-2 border-white dark:border-gray-500 shadow-sm object-cover" />
           <div className="flex-1">
             <h3 className="font-bold text-lg text-gray-800 dark:text-white">{user?.name}</h3>
@@ -88,8 +91,13 @@ const MenuScreen: React.FC<MenuProps> = ({ onNavigate }) => {
         </button>
       </div>
       
-      <div className="text-center mt-8 text-xs text-gray-400 dark:text-gray-600">
-        SocialConnect v2.0.1 <br/> Built with Supabase
+      {/* Terms */}
+      <div className="text-center mt-8 pb-8 text-xs text-gray-400 dark:text-gray-600">
+        <p>SocialConnect v2.0.1</p>
+        <div className="flex justify-center gap-4 mt-2">
+            <span className="hover:underline cursor-pointer">Terms of Service</span>
+            <span className="hover:underline cursor-pointer">Privacy Policy</span>
+        </div>
       </div>
     </div>
   );

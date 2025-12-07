@@ -3,18 +3,20 @@ import { Search, UserPlus, UserCheck, Loader2, Clock } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
 
-const SearchScreen: React.FC = () => {
+interface SearchProps {
+  onViewProfile?: (userId: string) => void;
+}
+
+const SearchScreen: React.FC<SearchProps> = ({ onViewProfile }) => {
   const { user } = useAuth();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<any[]>([]);
-  const [suggestions, setSuggestions] = useState<any[]>([]); // New State for Suggestions
+  const [suggestions, setSuggestions] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   
-  // স্ট্যাটাস রাখার জন্য (id -> 'pending' | 'accepted' | 'sent_request' | 'received_request')
   const [friendStatus, setFriendStatus] = useState<Record<string, string>>({});
 
   useEffect(() => {
-    // লোড হওয়ার সময় সাজেশন দেখাও
     fetchSuggestions();
   }, []);
 
@@ -31,16 +33,15 @@ const SearchScreen: React.FC = () => {
     if (!user) return;
     setLoading(true);
 
-    // ১. ফ্রেন্ড নয় এমন ইউজারদের আনো (সহজ লজিক: প্রথম ১০ জন)
     const { data: users } = await supabase
       .from('users')
       .select('*')
       .neq('id', user.id)
-      .limit(10); // Limit suggestion count
+      .limit(10);
 
     if (users) {
       setSuggestions(users);
-      checkFriendshipStatus(users.map(u => u.id)); // তাদের সাথে স্ট্যাটাস চেক করো
+      checkFriendshipStatus(users.map(u => u.id));
     }
     setLoading(false);
   };
@@ -62,7 +63,7 @@ const SearchScreen: React.FC = () => {
     setLoading(false);
   };
 
-  // Friendship Status Check Logic
+  // Friendship Check
   const checkFriendshipStatus = async (userIds: string[]) => {
     if (userIds.length === 0) return;
 
@@ -76,16 +77,9 @@ const SearchScreen: React.FC = () => {
     data?.forEach((f) => {
       const otherId = f.requester_id === user?.id ? f.receiver_id : f.requester_id;
       if (userIds.includes(otherId)) {
-        statusMap[otherId] = f.status; // 'pending' or 'accepted'
-        
-        // আমি পাঠিয়েছি এবং পেন্ডিং
-        if (f.status === 'pending' && f.requester_id === user?.id) {
-            statusMap[otherId] = 'sent_request';
-        }
-        // আমাকে পাঠিয়েছে এবং পেন্ডিং
-        if (f.status === 'pending' && f.receiver_id === user?.id) {
-            statusMap[otherId] = 'received_request';
-        }
+        statusMap[otherId] = f.status;
+        if (f.status === 'pending' && f.requester_id === user?.id) statusMap[otherId] = 'sent_request';
+        if (f.status === 'pending' && f.receiver_id === user?.id) statusMap[otherId] = 'received_request';
       }
     });
     setFriendStatus(prev => ({ ...prev, ...statusMap }));
@@ -111,12 +105,12 @@ const SearchScreen: React.FC = () => {
       .eq('receiver_id', receiverId);
   };
 
-  // Reusable User Card Render Function
+  // Render Card
   const renderUserCard = (u: any) => {
     const status = friendStatus[u.id];
     return (
       <div key={u.id} className="flex items-center justify-between bg-white dark:bg-gray-800 p-3 mb-3 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 cursor-pointer" onClick={() => onViewProfile && onViewProfile(u.id)}>
           <img src={u.avatar} className="w-12 h-12 rounded-full object-cover border dark:border-gray-600" />
           <div>
             <h3 className="font-bold text-gray-800 dark:text-white">{u.name}</h3>
@@ -164,7 +158,6 @@ const SearchScreen: React.FC = () => {
         {loading ? (
           <div className="flex justify-center mt-10"><Loader2 className="animate-spin text-blue-600" /></div>
         ) : query.length > 0 ? (
-          // Search Results
           <div>
              {results.length === 0 ? (
                 <div className="text-center mt-10 text-gray-500 dark:text-gray-400">No user found.</div>
@@ -173,7 +166,6 @@ const SearchScreen: React.FC = () => {
              )}
           </div>
         ) : (
-          // Suggestions (When search is empty)
           <div>
              <h3 className="font-bold text-gray-500 dark:text-gray-400 mb-4 uppercase text-xs tracking-wider">People You May Know</h3>
              {suggestions.length === 0 ? (
