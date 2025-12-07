@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Send, Share, Copy, Loader2, Check } from 'lucide-react';
+import { X, Send, Link, Copy, Check, Users, Globe } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
 
@@ -11,47 +11,36 @@ interface ShareModalProps {
 
 const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
   const { user } = useAuth();
-  const [view, setView] = useState<'main' | 'friends'>('main');
-  const [friends, setFriends] = useState<any[]>([]);
+  const [caption, setCaption] = useState('');
   const [loading, setLoading] = useState(false);
-  const [sentList, setSentList] = useState<Set<string>>(new Set());
+  const [copied, setCopied] = useState(false);
+  const [friends, setFriends] = useState<any[]>([]);
 
-  // ফ্রেন্ড লিস্ট লোড করা (মেসেজ পাঠানোর জন্য)
   useEffect(() => {
-    if (view === 'friends') {
-      fetchFriends();
-    }
-  }, [view]);
+    if (isOpen) fetchFriends();
+  }, [isOpen]);
 
   const fetchFriends = async () => {
-    // যারা ফ্রেন্ড রিকোয়েস্ট এক্সেপ্ট করেছে তাদের আইডি আনো
+    // সিম্পল ফ্রেন্ড লিস্ট ফেচিং (চ্যাটে পাঠানোর জন্য)
     const { data: sent } = await supabase.from('friendships').select('receiver_id').eq('requester_id', user?.id).eq('status', 'accepted');
-    const { data: received } = await supabase.from('friendships').select('requester_id').eq('receiver_id', user?.id).eq('status', 'accepted');
-
-    const ids = new Set<string>();
-    sent?.forEach(f => ids.add(f.receiver_id));
-    received?.forEach(f => ids.add(f.requester_id));
-
+    const { data: recv } = await supabase.from('friendships').select('requester_id').eq('receiver_id', user?.id).eq('status', 'accepted');
+    
+    const ids = new Set([...(sent?.map(d => d.receiver_id) || []), ...(recv?.map(d => d.requester_id) || [])]);
     if (ids.size > 0) {
-      const { data } = await supabase.from('users').select('*').in('id', Array.from(ids));
-      if (data) setFriends(data);
+        const { data } = await supabase.from('users').select('*').in('id', Array.from(ids)).limit(5);
+        if (data) setFriends(data);
     }
   };
 
-  // ১. নিউজ ফিডে শেয়ার করা (Facebook Style)
   const handleShareToFeed = async () => {
     setLoading(true);
     try {
-      // যদি এটা অলরেডি শেয়ারড পোস্ট হয়, তাহলে আসল পোস্টের আইডি নাও, না হলে বর্তমান পোস্টের আইডি
-      const originalId = post.original_post_id ? post.original_post_id : post.id;
-
       await supabase.from('posts').insert({
         user_id: user?.id,
-        content: `Shared a post`, // ডিফল্ট ক্যাপশন
-        original_post_id: originalId // 🔥 এইটাই মেইন ম্যাজিক (আসল পোস্টের রেফারেন্স)
+        content: caption,
+        original_post_id: post.id // এটাই শেয়ার লজিক
       });
-      
-      alert("Shared to your timeline!");
+      alert('Shared to your feed!');
       onClose();
     } catch (error) {
       console.error(error);
@@ -60,94 +49,96 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
     }
   };
 
-  // ২. মেসেজে পাঠানো
-  const handleSendMsg = async (receiverId: string) => {
-    const postLink = `${window.location.origin}/post/${post.id}`;
-    
+  const handleSendInMessenger = async (receiverId: string) => {
+    const postLink = `${window.location.origin}/post/${post.id}`; // বা পোস্টের প্রিভিউ
     await supabase.from('messages').insert({
-      sender_id: user?.id,
-      receiver_id: receiverId,
-      content: `Check this post: ${postLink}`
+        sender_id: user?.id,
+        receiver_id: receiverId,
+        content: `Shared a post: ${post.content?.substring(0, 30)}...`,
+        type: 'text'
     });
-
-    setSentList(prev => new Set(prev).add(receiverId));
+    alert('Sent!');
   };
 
-  // ৩. কপি লিংক
-  const handleCopyLink = () => {
-    const link = `${window.location.origin}/post/${post.id}`;
-    navigator.clipboard.writeText(link);
-    alert("Link copied!");
-    onClose();
+  const copyLink = () => {
+    navigator.clipboard.writeText(`${window.location.origin}/post/${post.id}`);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   };
 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm animate-fade-in">
-      <div className="bg-white dark:bg-gray-800 w-full sm:w-[450px] rounded-t-3xl sm:rounded-2xl p-5 shadow-2xl transition-colors">
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-fade-in p-4">
+      <div className="bg-white dark:bg-gray-800 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden">
         
         {/* Header */}
-        <div className="flex justify-between items-center mb-6 border-b dark:border-gray-700 pb-3">
-          <h3 className="font-bold text-lg dark:text-white">
-            {view === 'main' ? 'Share to' : 'Send to'}
-          </h3>
-          <button onClick={onClose} className="bg-gray-100 dark:bg-gray-700 p-2 rounded-full text-gray-600 dark:text-white">
-            <X size={20} />
-          </button>
+        <div className="p-4 border-b dark:border-gray-700 flex justify-between items-center">
+          <h3 className="text-lg font-bold dark:text-white">Share Post</h3>
+          <button onClick={onClose}><X className="dark:text-white"/></button>
         </div>
 
-        {/* VIEW 1: Main Options */}
-        {view === 'main' ? (
-          <div className="space-y-4">
-            <div className="flex gap-4 justify-around">
-              {/* Share to Feed */}
-              <button onClick={handleShareToFeed} disabled={loading} className="flex flex-col items-center gap-2 group">
-                <div className="w-14 h-14 bg-blue-600 rounded-full flex items-center justify-center text-white shadow-lg group-active:scale-95 transition-transform">
-                  {loading ? <Loader2 className="animate-spin"/> : <Share size={24} />}
-                </div>
-                <span className="text-xs font-medium dark:text-gray-300">News Feed</span>
-              </button>
-
-              {/* Send Message */}
-              <button onClick={() => setView('friends')} className="flex flex-col items-center gap-2 group">
-                <div className="w-14 h-14 bg-purple-600 rounded-full flex items-center justify-center text-white shadow-lg group-active:scale-95 transition-transform">
-                  <Send size={24} />
-                </div>
-                <span className="text-xs font-medium dark:text-gray-300">Send Msg</span>
-              </button>
-            </div>
-
-            <div onClick={handleCopyLink} className="flex items-center gap-3 p-3 bg-gray-100 dark:bg-gray-700 rounded-xl cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors mt-4">
-              <div className="bg-white dark:bg-gray-600 p-2 rounded-lg"><Copy size={20} className="dark:text-white"/></div>
-              <span className="font-semibold text-sm dark:text-white">Copy Link</span>
-            </div>
-          </div>
-        ) : (
-          /* VIEW 2: Friend List for Messaging */
-          <div className="h-64 overflow-y-auto space-y-2">
-            {friends.length === 0 ? (
-                <p className="text-center text-gray-500 py-10">No friends found.</p>
-            ) : (
-                friends.map(friend => (
-                <div key={friend.id} className="flex items-center justify-between p-2 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-xl">
-                    <div className="flex items-center gap-3">
-                        <img src={friend.avatar} className="w-10 h-10 rounded-full border dark:border-gray-600" />
-                        <span className="font-bold text-sm dark:text-white">{friend.name}</span>
+        {/* Share Input */}
+        <div className="p-4">
+            <div className="flex gap-3 mb-4">
+                <img src={user?.avatar} className="w-10 h-10 rounded-full border" />
+                <div className="flex-1">
+                    <h4 className="font-bold text-sm dark:text-white">{user?.name}</h4>
+                    <div className="flex items-center gap-1 text-xs text-gray-500 bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded w-fit mt-1">
+                        <Globe size={12}/> Public
                     </div>
-                    <button 
-                        onClick={() => handleSendMsg(friend.id)} 
-                        disabled={sentList.has(friend.id)}
-                        className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${sentList.has(friend.id) ? 'bg-green-100 text-green-700' : 'bg-blue-600 text-white'}`}
-                    >
-                        {sentList.has(friend.id) ? 'Sent' : 'Send'}
-                    </button>
                 </div>
-                ))
-            )}
-            <button onClick={() => setView('main')} className="w-full mt-4 text-center text-sm text-gray-500 hover:underline">Back</button>
-          </div>
-        )}
+            </div>
+            <textarea 
+                value={caption}
+                onChange={(e) => setCaption(e.target.value)}
+                placeholder="Say something about this..." 
+                className="w-full bg-transparent text-gray-800 dark:text-white outline-none resize-none h-20 placeholder-gray-400"
+            />
+            
+            {/* Post Preview (Original Post) */}
+            <div className="border rounded-xl p-3 mt-2 bg-gray-50 dark:bg-gray-700/50">
+                <div className="flex items-center gap-2 mb-2">
+                    <img src={post.users?.avatar} className="w-6 h-6 rounded-full" />
+                    <span className="font-bold text-sm dark:text-white">{post.users?.name}</span>
+                </div>
+                {post.image_url && <img src={post.image_url} className="w-full h-32 object-cover rounded-lg" />}
+                <p className="text-xs text-gray-500 mt-1 line-clamp-2">{post.content}</p>
+            </div>
+
+            <button onClick={handleShareToFeed} disabled={loading} className="w-full bg-blue-600 text-white py-2.5 rounded-xl font-bold mt-4 hover:bg-blue-700 transition">
+                {loading ? 'Sharing...' : 'Share Now'}
+            </button>
+        </div>
+
+        {/* Send in Messenger */}
+        <div className="p-4 border-t dark:border-gray-700">
+            <h4 className="text-sm font-bold text-gray-500 mb-3">Send in Messenger</h4>
+            <div className="flex gap-4 overflow-x-auto pb-2 scrollbar-hide">
+                {friends.map(f => (
+                    <div key={f.id} className="flex flex-col items-center gap-1 min-w-[60px] cursor-pointer" onClick={() => handleSendInMessenger(f.id)}>
+                        <img src={f.avatar} className="w-12 h-12 rounded-full border dark:border-gray-600" />
+                        <span className="text-xs truncate w-full text-center dark:text-gray-300">{f.name.split(' ')[0]}</span>
+                        <div className="bg-blue-100 text-blue-600 rounded-full p-1 mt-[-10px] z-10 border-2 border-white dark:border-gray-800"><Send size={10}/></div>
+                    </div>
+                ))}
+            </div>
+        </div>
+
+        {/* Copy Link */}
+        <div className="p-4 border-t dark:border-gray-700 flex gap-4">
+            <button onClick={copyLink} className="flex-1 flex flex-col items-center gap-1 p-3 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-xl transition">
+                <div className="bg-gray-200 dark:bg-gray-600 p-2 rounded-full">
+                    {copied ? <Check size={20} className="text-green-600"/> : <Link size={20} className="dark:text-white"/>}
+                </div>
+                <span className="text-xs dark:text-gray-300">{copied ? 'Copied' : 'Copy Link'}</span>
+            </button>
+            <button className="flex-1 flex flex-col items-center gap-1 p-3 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-xl transition">
+                <div className="bg-gray-200 dark:bg-gray-600 p-2 rounded-full"><Users size={20} className="dark:text-white"/></div>
+                <span className="text-xs dark:text-gray-300">Group</span>
+            </button>
+        </div>
+
       </div>
     </div>
   );
