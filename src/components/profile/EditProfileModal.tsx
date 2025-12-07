@@ -11,15 +11,16 @@ interface EditProfileProps {
 
 const EditProfileModal: React.FC<EditProfileProps> = ({ isOpen, onClose, onUpdate }) => {
   const { user } = useAuth();
+  
+  // ✅ Fix: Add optional chaining and fallback
   const [name, setName] = useState(user?.name || '');
-  const [bio, setBio] = useState(user?.bio || ''); // Bio State
+  const [bio, setBio] = useState(user?.bio || ''); 
   const [loading, setLoading] = useState(false);
 
   // Image handling
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [coverFile, setCoverFile] = useState<File | null>(null);
 
-  // Previews
   const [avatarPreview, setAvatarPreview] = useState(user?.avatar);
   const [coverPreview, setCoverPreview] = useState(user?.cover_photo);
 
@@ -42,23 +43,20 @@ const EditProfileModal: React.FC<EditProfileProps> = ({ isOpen, onClose, onUpdat
     let coverUrl = user?.cover_photo;
 
     try {
-      // 1. Upload Avatar if changed
       if (avatarFile) {
         const fileName = `avatar_${user?.id}_${Date.now()}`;
-        await supabase.storage.from('avatars').upload(fileName, avatarFile);
+        await supabase.storage.from('avatars').upload(fileName, avatarFile, { upsert: true });
         const { data } = supabase.storage.from('avatars').getPublicUrl(fileName);
         avatarUrl = data.publicUrl;
       }
 
-      // 2. Upload Cover if changed
       if (coverFile) {
         const fileName = `cover_${user?.id}_${Date.now()}`;
-        await supabase.storage.from('avatars').upload(fileName, coverFile); // Same bucket
+        await supabase.storage.from('avatars').upload(fileName, coverFile, { upsert: true });
         const { data } = supabase.storage.from('avatars').getPublicUrl(fileName);
         coverUrl = data.publicUrl;
       }
 
-      // 3. Update Database
       const { error } = await supabase.from('users').update({
         name,
         bio,
@@ -67,7 +65,7 @@ const EditProfileModal: React.FC<EditProfileProps> = ({ isOpen, onClose, onUpdat
       }).eq('id', user?.id);
 
       if (!error) {
-        onUpdate(); // Refresh Profile
+        onUpdate();
         onClose();
       }
     } catch (error) {
@@ -81,15 +79,15 @@ const EditProfileModal: React.FC<EditProfileProps> = ({ isOpen, onClose, onUpdat
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-fade-in p-4">
-      <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden">
-        <div className="p-4 border-b flex justify-between items-center">
-          <h2 className="font-bold text-lg">Edit Profile</h2>
-          <button onClick={onClose}><X size={20} /></button>
+      <div className="bg-white dark:bg-gray-800 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden">
+        <div className="p-4 border-b dark:border-gray-700 flex justify-between items-center">
+          <h2 className="font-bold text-lg dark:text-white">Edit Profile</h2>
+          <button onClick={onClose}><X size={20} className="dark:text-white"/></button>
         </div>
 
         <div className="p-4 space-y-4">
-          {/* Cover Photo Edit */}
-          <div className="relative h-32 bg-gray-200 rounded-xl overflow-hidden group">
+          {/* Cover Photo */}
+          <div className="relative h-32 bg-gray-200 dark:bg-gray-700 rounded-xl overflow-hidden group">
             {coverPreview ? (
               <img src={coverPreview} className="w-full h-full object-cover" />
             ) : (
@@ -101,9 +99,9 @@ const EditProfileModal: React.FC<EditProfileProps> = ({ isOpen, onClose, onUpdat
             </label>
           </div>
 
-          {/* Avatar Edit */}
+          {/* Avatar */}
           <div className="relative w-24 h-24 mx-auto -mt-16">
-            <img src={avatarPreview} className="w-full h-full rounded-full border-4 border-white object-cover bg-white" />
+            <img src={avatarPreview} className="w-full h-full rounded-full border-4 border-white dark:border-gray-800 object-cover bg-white" />
             <label className="absolute bottom-0 right-0 bg-blue-600 p-1.5 rounded-full text-white cursor-pointer border-2 border-white hover:bg-blue-700">
               <Camera size={14} />
               <input type="file" hidden onChange={(e) => handleImageChange(e, 'avatar')} />
@@ -112,17 +110,17 @@ const EditProfileModal: React.FC<EditProfileProps> = ({ isOpen, onClose, onUpdat
 
           {/* Inputs */}
           <div>
-            <label className="text-sm font-medium text-gray-700">Name</label>
-            <input value={name} onChange={(e) => setName(e.target.value)} className="w-full p-3 border rounded-xl bg-gray-50 focus:outline-blue-500 mt-1" />
+            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Name</label>
+            <input value={name} onChange={(e) => setName(e.target.value)} className="w-full p-3 border dark:border-gray-600 rounded-xl bg-gray-50 dark:bg-gray-700 dark:text-white mt-1" />
           </div>
 
           <div>
-            <label className="text-sm font-medium text-gray-700">Bio</label>
+            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Bio</label>
             <textarea 
               value={bio} 
               onChange={(e) => setBio(e.target.value)} 
               placeholder="Describe yourself..."
-              className="w-full p-3 border rounded-xl bg-gray-50 focus:outline-blue-500 mt-1 h-24 resize-none" 
+              className="w-full p-3 border dark:border-gray-600 rounded-xl bg-gray-50 dark:bg-gray-700 dark:text-white mt-1 h-24 resize-none" 
             />
           </div>
 

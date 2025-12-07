@@ -3,11 +3,14 @@ import { supabase } from '../lib/supabase';
 import { avatars } from '../data/mockData';
 import Peer from 'peerjs';
 
+// ✅ User Interface Updated (Optional Fields Added)
 interface User {
   id: string;
   name: string;
   email: string;
   avatar: string;
+  bio?: string;        // Optional
+  cover_photo?: string; // Optional (Matches DB column name)
 }
 
 interface AuthContextType {
@@ -60,14 +63,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   }, [user]);
 
-  // ✅ Fixed Presence Logic
   const setupPresence = (userId: string) => {
     const room = supabase.channel('online-users', {
       config: { presence: { key: userId } },
     });
 
-    room
-      .on('presence', { event: 'sync' }, () => {
+    room.on('presence', { event: 'sync' }, () => {
         const newState = room.presenceState();
         const onlineIds = new Set(Object.keys(newState));
         setOnlineUsers(onlineIds);
@@ -81,8 +82,19 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const fetchProfile = async (id: string, email: string) => {
     const { data } = await supabase.from('users').select('*').eq('id', id).single();
-    if (data) setUser(data);
-    else setUser({ id, email, name: email.split('@')[0], avatar: avatars.men[0] });
+    if (data) {
+      setUser(data);
+    } else {
+      // ✅ Fix: Provide all required fields or rely on optional types
+      setUser({ 
+        id, 
+        email, 
+        name: email.split('@')[0], 
+        avatar: avatars.men[0],
+        bio: '',         // Default empty
+        cover_photo: ''  // Default empty
+      });
+    }
     setLoading(false);
   };
 
@@ -113,7 +125,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const logout = async () => {
     await supabase.auth.signOut();
-    supabase.removeAllChannels(); // ✅ Clean up
+    supabase.removeAllChannels();
     if (peer) peer.destroy();
     setOnlineUsers(new Set());
     setUser(null);
