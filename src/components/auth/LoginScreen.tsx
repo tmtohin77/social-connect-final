@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
-import { Mail, Lock, ArrowLeft, Loader2 } from 'lucide-react';
-import CustomInput from '../shared/CustomInput';
-import { appLogo } from '../../data/mockData';
+import { Mail, Lock, Loader2, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { appLogo } from '../../data/mockData';
+import { Button } from '../ui/button';
+import { Input } from '../ui/input';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '../ui/card';
 
 interface LoginScreenProps {
   onBack: () => void;
@@ -13,6 +15,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onBack, onRegisterClick }) =>
   const { login } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -27,43 +30,80 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onBack, onRegisterClick }) =>
       setError('Invalid email or password');
       setLoading(false);
     }
-    // Success is handled by AuthContext (App.tsx will switch screen)
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 animate-fade-in">
-      <div className="bg-gradient-to-r from-blue-600 to-blue-500 pt-12 pb-20 px-6 rounded-b-3xl">
-        <button onClick={onBack} className="text-white mb-6 flex items-center gap-2 hover:opacity-80">
-          <ArrowLeft size={24} /> Back
-        </button>
-        <div className="flex items-center gap-4">
-          <img src={appLogo} alt="Logo" className="w-12 h-12 rounded-xl" />
-          <div>
-            <h1 className="text-2xl font-bold text-white">Welcome Back!</h1>
-            <p className="text-blue-100">Sign in to continue</p>
+    <div className="min-h-screen flex items-center justify-center bg-gray-50/50 dark:bg-gray-900/50 p-4 animate-fade-in">
+      <Card className="w-full max-w-md shadow-xl border-border/50 bg-white/80 dark:bg-gray-950/80 backdrop-blur-xl">
+        <CardHeader className="space-y-3 flex flex-col items-center text-center pb-2">
+          <div className="w-16 h-16 bg-gradient-to-tr from-blue-600 to-purple-600 rounded-2xl p-[2px] mb-2 shadow-lg">
+            <div className="bg-white w-full h-full rounded-2xl flex items-center justify-center overflow-hidden">
+                <img src={appLogo} alt="Logo" className="w-full h-full object-cover" />
+            </div>
           </div>
-        </div>
-      </div>
+          <CardTitle className="text-2xl font-bold tracking-tight">Welcome Back</CardTitle>
+          <CardDescription>Enter your credentials to access your account</CardDescription>
+        </CardHeader>
+        
+        <CardContent>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">Email</label>
+              <div className="relative">
+                <Mail className="absolute left-3 top-3.5 h-4 w-4 text-muted-foreground" />
+                <Input 
+                    type="email" 
+                    placeholder="name@example.com" 
+                    value={email} 
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="pl-10"
+                    required 
+                />
+              </div>
+            </div>
 
-      <div className="px-6 -mt-10">
-        <div className="bg-white rounded-2xl shadow-xl p-6">
-          <form onSubmit={handleSubmit}>
-            <CustomInput label="Email" type="email" value={email} onChange={setEmail} placeholder="Enter your email" icon={<Mail size={20} />} />
-            <CustomInput label="Password" value={password} onChange={setPassword} placeholder="Enter your password" icon={<Lock size={20} />} showPasswordToggle />
-            
-            {error && <p className="text-red-500 text-sm mb-4 text-center">{error}</p>}
+            <div className="space-y-2">
+              <label className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">Password</label>
+              <div className="relative">
+                <Lock className="absolute left-3 top-3.5 h-4 w-4 text-muted-foreground" />
+                <Input 
+                    type={showPassword ? "text" : "password"} 
+                    placeholder="Enter your password" 
+                    value={password} 
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="pl-10 pr-10"
+                    required 
+                />
+                <button 
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-3.5 text-muted-foreground hover:text-foreground transition-colors"
+                >
+                    {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+            </div>
 
-            <button type="submit" disabled={loading} className="w-full py-4 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition-all active:scale-95 flex justify-center items-center gap-2">
-              {loading ? <Loader2 className="animate-spin" /> : 'Sign In'}
-            </button>
+            {error && <div className="text-red-500 text-sm text-center font-medium bg-red-50 dark:bg-red-900/20 p-2 rounded-lg">{error}</div>}
+
+            <Button type="submit" className="w-full font-bold shadow-blue-500/25 shadow-lg" size="lg" disabled={loading}>
+              {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Sign In'}
+            </Button>
           </form>
+        </CardContent>
 
-          <div className="mt-6 text-center">
-            <p className="text-gray-600">Don't have an account?</p>
-            <button onClick={onRegisterClick} className="text-blue-600 font-semibold hover:underline">Create New Account</button>
+        <CardFooter className="flex flex-col gap-4 border-t pt-6">
+          <div className="text-center text-sm text-muted-foreground">
+            Don't have an account?{' '}
+            <button onClick={onRegisterClick} className="font-bold text-primary hover:underline underline-offset-4">
+              Create account
+            </button>
           </div>
-        </div>
-      </div>
+          <button onClick={onBack} className="text-xs text-muted-foreground hover:text-foreground transition-colors">
+            ← Back to start
+          </button>
+        </CardFooter>
+      </Card>
     </div>
   );
 };

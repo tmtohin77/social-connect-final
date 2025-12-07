@@ -1,8 +1,13 @@
 import React, { useEffect, useState } from 'react';
-import { X, Send, Loader2 } from 'lucide-react';
+import { Send, Loader2, Trash2 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
 import { formatDistanceToNow } from 'date-fns';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog';
+import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar';
+import { Input } from '../ui/input';
+import { Button } from '../ui/button';
+import { ScrollArea } from '../ui/scroll-area';
 
 interface CommentModalProps {
   isOpen: boolean;
@@ -15,14 +20,14 @@ const CommentModal: React.FC<CommentModalProps> = ({ isOpen, onClose, postId }) 
   const [comments, setComments] = useState<any[]>([]);
   const [newComment, setNewComment] = useState('');
   const [loading, setLoading] = useState(false);
+  const [sending, setSending] = useState(false);
 
   useEffect(() => {
-    if (isOpen && postId) {
-      fetchComments();
-    }
+    if (isOpen && postId) fetchComments();
   }, [isOpen, postId]);
 
   const fetchComments = async () => {
+    setLoading(true);
     const { data } = await supabase
       .from('comments')
       .select('*, users(name, avatar)')
@@ -30,73 +35,94 @@ const CommentModal: React.FC<CommentModalProps> = ({ isOpen, onClose, postId }) 
       .order('created_at', { ascending: true });
     
     if (data) setComments(data);
+    setLoading(false);
   };
 
-  const handleSend = async () => {
+  const handleSend = async (e: React.FormEvent) => {
+    e.preventDefault();
     if (!newComment.trim()) return;
-    setLoading(true);
+    setSending(true);
 
     const { error } = await supabase.from('comments').insert({
-      user_id: user?.id,
       post_id: postId,
+      user_id: user?.id,
       content: newComment
     });
 
     if (!error) {
       setNewComment('');
-      fetchComments(); // রিফ্রেশ কমেন্ট লিস্ট
+      // Send Notification Logic (Optional)
+      fetchComments();
     }
-    setLoading(false);
+    setSending(false);
   };
 
-  if (!isOpen) return null;
+  const handleDelete = async (id: string) => {
+    if(confirm("Delete comment?")) {
+        await supabase.from('comments').delete().eq('id', id);
+        setComments(prev => prev.filter(c => c.id !== id));
+    }
+  };
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm animate-fade-in">
-      <div className="bg-white w-full sm:w-[500px] h-[80vh] sm:h-[600px] rounded-t-3xl sm:rounded-2xl flex flex-col shadow-2xl">
-        {/* Header */}
-        <div className="p-4 border-b flex justify-between items-center">
-          <h3 className="font-bold text-gray-800">Comments</h3>
-          <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full"><X size={20} /></button>
-        </div>
-
-        {/* Comments List */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {comments.length === 0 ? (
-            <div className="text-center text-gray-400 mt-10">No comments yet.</div>
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="sm:max-w-[500px] h-[80vh] flex flex-col p-0 gap-0 overflow-hidden">
+        <DialogHeader className="p-4 border-b border-border/50">
+            <DialogTitle>Comments</DialogTitle>
+        </DialogHeader>
+        
+        <ScrollArea className="flex-1 p-4 bg-gray-50/50 dark:bg-gray-900/50">
+          {loading ? (
+             <div className="flex justify-center mt-10"><Loader2 className="animate-spin text-primary"/></div>
+          ) : comments.length === 0 ? (
+             <div className="text-center mt-10 text-muted-foreground">No comments yet.</div>
           ) : (
-            comments.map((c) => (
-              <div key={c.id} className="flex gap-3">
-                <img src={c.users?.avatar} className="w-8 h-8 rounded-full" />
-                <div className="bg-gray-100 p-3 rounded-2xl rounded-tl-none">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="font-bold text-xs">{c.users?.name}</span>
-                    <span className="text-[10px] text-gray-400">{formatDistanceToNow(new Date(c.created_at))} ago</span>
-                  </div>
-                  <p className="text-sm text-gray-800">{c.content}</p>
-                </div>
-              </div>
-            ))
+            <div className="space-y-4">
+                {comments.map(comment => (
+                    <div key={comment.id} className="flex gap-3 group">
+                        <Avatar className="w-8 h-8 mt-1">
+                            <AvatarImage src={comment.users?.avatar} />
+                            <AvatarFallback>U</AvatarFallback>
+                        </Avatar>
+                        <div className="flex-1">
+                            <div className="bg-white dark:bg-gray-800 p-3 rounded-2xl rounded-tl-none shadow-sm border border-border/40 relative">
+                                <h4 className="font-bold text-xs text-foreground mb-1">{comment.users?.name}</h4>
+                                <p className="text-sm text-foreground/90">{comment.content}</p>
+                                
+                                {user?.id === comment.user_id && (
+                                    <button onClick={() => handleDelete(comment.id)} className="absolute top-2 right-2 text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <Trash2 size={14} />
+                                    </button>
+                                )}
+                            </div>
+                            <p className="text-[10px] text-muted-foreground mt-1 ml-1">
+                                {formatDistanceToNow(new Date(comment.created_at), { addSuffix: true })}
+                            </p>
+                        </div>
+                    </div>
+                ))}
+            </div>
           )}
-        </div>
+        </ScrollArea>
 
-        {/* Input */}
-        <div className="p-3 border-t bg-white pb-6 sm:pb-3">
-          <div className="flex items-center gap-2 bg-gray-100 p-1.5 rounded-full">
-            <img src={user?.avatar} className="w-8 h-8 rounded-full border" />
-            <input 
-              value={newComment}
-              onChange={(e) => setNewComment(e.target.value)}
-              placeholder="Write a comment..." 
-              className="flex-1 bg-transparent text-sm px-2 focus:outline-none"
-            />
-            <button onClick={handleSend} disabled={loading || !newComment.trim()} className="p-2 bg-blue-600 text-white rounded-full disabled:opacity-50">
-              {loading ? <Loader2 size={16} className="animate-spin"/> : <Send size={16} />}
-            </button>
-          </div>
+        <div className="p-3 border-t border-border/50 bg-background">
+            <form onSubmit={handleSend} className="flex gap-2 items-center">
+                <Avatar className="w-8 h-8">
+                    <AvatarImage src={user?.avatar} />
+                </Avatar>
+                <Input 
+                    value={newComment}
+                    onChange={(e) => setNewComment(e.target.value)}
+                    placeholder="Write a comment..."
+                    className="flex-1 h-10 rounded-full"
+                />
+                <Button type="submit" size="icon" disabled={sending} className="rounded-full h-10 w-10 shrink-0">
+                    {sending ? <Loader2 size={16} className="animate-spin"/> : <Send size={16}/>}
+                </Button>
+            </form>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 };
 

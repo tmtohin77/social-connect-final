@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { User, Mail, Lock, ArrowLeft, Calendar, Loader2 } from 'lucide-react';
-import CustomInput from '../shared/CustomInput';
-import { appLogo } from '../../data/mockData';
+import { User, Mail, Lock, Calendar, Loader2, ArrowLeft, CheckCircle2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { Button } from '../ui/button';
+import { Input } from '../ui/input';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '../ui/card';
 
 interface RegisterScreenProps {
   onBack: () => void;
@@ -19,6 +20,7 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ onBack }) => {
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError('');
     setLoading(true);
     const { error } = await register(formData);
     setLoading(false);
@@ -33,57 +35,109 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ onBack }) => {
     setLoading(false);
     
     if (error) alert('Invalid Code');
-    // Success handled by App.tsx
   };
 
   if (step === 'otp') {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
-        <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md text-center">
-          <div className="mx-auto w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mb-4">
-            <Mail size={32} className="text-green-600" />
-          </div>
-          <h2 className="text-2xl font-bold mb-2">Check Email</h2>
-          <p className="text-gray-500 mb-6">Code sent to {formData.contact}</p>
-          <input type="text" value={otp} onChange={(e) => setOtp(e.target.value)} placeholder="Enter Code" className="w-full text-center text-2xl py-3 border rounded-xl mb-6" />
-          <button onClick={handleVerify} disabled={loading} className="w-full py-3 bg-blue-600 text-white rounded-xl font-semibold">
-            {loading ? 'Verifying...' : 'Verify'}
-          </button>
-        </div>
+      <div className="min-h-screen flex items-center justify-center bg-gray-50/50 dark:bg-gray-900/50 p-4 animate-slide-up">
+        <Card className="w-full max-w-md shadow-2xl text-center p-4">
+          <CardHeader>
+            <div className="mx-auto w-16 h-16 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center mb-4">
+              <Mail className="h-8 w-8 text-green-600 dark:text-green-400" />
+            </div>
+            <CardTitle>Verify Email</CardTitle>
+            <CardDescription>We sent a 6-digit code to <span className="font-bold text-foreground">{formData.contact}</span></CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <Input 
+                value={otp} 
+                onChange={(e) => setOtp(e.target.value)} 
+                placeholder="Enter 6-digit code" 
+                className="text-center text-2xl tracking-widest font-mono h-14" 
+                maxLength={6}
+            />
+            <Button onClick={handleVerify} className="w-full" disabled={loading} size="lg">
+              {loading ? <Loader2 className="animate-spin mr-2" /> : <CheckCircle2 className="mr-2 h-5 w-5"/>}
+              Verify Account
+            </Button>
+          </CardContent>
+        </Card>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 pb-8">
-      <div className="bg-gradient-to-r from-blue-600 to-purple-600 pt-12 pb-16 px-6 rounded-b-3xl">
-        <button onClick={onBack} className="text-white mb-4 flex items-center gap-2"><ArrowLeft size={24} /> Back</button>
-        <h1 className="text-2xl font-bold text-white">Create Account</h1>
-      </div>
-      <div className="px-6 -mt-8">
-        <div className="bg-white rounded-2xl shadow-xl p-6">
-          <form onSubmit={handleRegister}>
-            <CustomInput label="Name" value={formData.name} onChange={(v) => setFormData({...formData, name: v})} icon={<User size={20} />} />
-            <CustomInput label="Email" value={formData.contact} onChange={(v) => setFormData({...formData, contact: v})} icon={<Mail size={20} />} />
-            <div className="grid grid-cols-2 gap-4">
-              <CustomInput label="Age" type="number" value={formData.age} onChange={(v) => setFormData({...formData, age: v})} icon={<Calendar size={20} />} />
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-1">Gender</label>
-                <select className="w-full p-3 border rounded-xl bg-gray-50" value={formData.gender} onChange={(e) => setFormData({...formData, gender: e.target.value})}>
-                  <option>Male</option><option>Female</option>
-                </select>
+    <div className="min-h-screen flex items-center justify-center bg-gray-50/50 dark:bg-gray-900/50 p-4 animate-fade-in py-10">
+      <Card className="w-full max-w-md shadow-xl border-border/50 bg-white/80 dark:bg-gray-950/80 backdrop-blur-xl">
+        <CardHeader className="space-y-1">
+          <div className="flex items-center gap-2 mb-2">
+            <Button variant="ghost" size="icon" onClick={onBack} className="-ml-2 h-8 w-8 rounded-full">
+                <ArrowLeft className="h-4 w-4"/>
+            </Button>
+            <CardTitle className="text-xl">Create Account</CardTitle>
+          </div>
+          <CardDescription>Fill in your details to get started.</CardDescription>
+        </CardHeader>
+        
+        <CardContent>
+          <form onSubmit={handleRegister} className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Full Name</label>
+              <div className="relative">
+                <User className="absolute left-3 top-3.5 h-4 w-4 text-muted-foreground" />
+                <Input value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})} className="pl-10" placeholder="John Doe" required />
               </div>
             </div>
-            <CustomInput label="Password" value={formData.password} onChange={(v) => setFormData({...formData, password: v})} icon={<Lock size={20} />} showPasswordToggle />
-            
-            {error && <p className="text-red-500 text-sm mb-2">{error}</p>}
-            
-            <button type="submit" disabled={loading} className="w-full py-4 bg-blue-600 text-white font-semibold rounded-xl mt-2">
-              {loading ? <Loader2 className="animate-spin mx-auto" /> : 'Get Code'}
-            </button>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Email Address</label>
+              <div className="relative">
+                <Mail className="absolute left-3 top-3.5 h-4 w-4 text-muted-foreground" />
+                <Input type="email" value={formData.contact} onChange={(e) => setFormData({...formData, contact: e.target.value})} className="pl-10" placeholder="name@example.com" required />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                    <label className="text-sm font-medium">Age</label>
+                    <div className="relative">
+                        <Calendar className="absolute left-3 top-3.5 h-4 w-4 text-muted-foreground" />
+                        <Input type="number" value={formData.age} onChange={(e) => setFormData({...formData, age: e.target.value})} className="pl-10" placeholder="25" required />
+                    </div>
+                </div>
+                <div className="space-y-2">
+                    <label className="text-sm font-medium">Gender</label>
+                    <select 
+                        className="flex h-12 w-full rounded-xl border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                        value={formData.gender} 
+                        onChange={(e) => setFormData({...formData, gender: e.target.value})}
+                    >
+                        <option>Male</option>
+                        <option>Female</option>
+                        <option>Other</option>
+                    </select>
+                </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Password</label>
+              <div className="relative">
+                <Lock className="absolute left-3 top-3.5 h-4 w-4 text-muted-foreground" />
+                <Input type="password" value={formData.password} onChange={(e) => setFormData({...formData, password: e.target.value})} className="pl-10" placeholder="Create a strong password" required />
+              </div>
+            </div>
+
+            {error && <p className="text-red-500 text-sm text-center bg-red-50 p-2 rounded">{error}</p>}
+
+            <Button type="submit" className="w-full font-bold shadow-lg mt-2" size="lg" disabled={loading}>
+              {loading ? <Loader2 className="animate-spin" /> : 'Sign Up'}
+            </Button>
           </form>
-        </div>
-      </div>
+        </CardContent>
+        <CardFooter className="justify-center border-t pt-4">
+             <p className="text-sm text-muted-foreground">Already have an account? <button onClick={onBack} className="text-primary font-bold hover:underline">Log in</button></p>
+        </CardFooter>
+      </Card>
     </div>
   );
 };
