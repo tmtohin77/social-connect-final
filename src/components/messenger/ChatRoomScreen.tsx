@@ -26,16 +26,14 @@ interface ChatRoomProps {
 
 const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfile, onStartCall }) => {
   const { user, onlineUsers } = useAuth();
-  
   const [messages, setMessages] = useState<any[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [sending, setSending] = useState(false);
   const isGroup = receiver.type === 'group';
   const isActive = !isGroup && onlineUsers.has(receiver.id);
 
-  // Group Call States
   const [isGroupCallActive, setIsGroupCallActive] = useState(false);
-  const [activeCallers, setActiveCallers] = useState<any[]>([]);
+  const [ongoingCallUsers, setOngoingCallUsers] = useState<number>(0);
 
   const [showEmoji, setShowEmoji] = useState(false);
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
@@ -55,7 +53,6 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
     fetchHistory();
     markAsSeen();
 
-    // 1. Message Subscription
     const chatChannel = supabase.channel(`chat:${receiver.id}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, (payload) => {
         if (payload.eventType === 'DELETE') {
@@ -83,14 +80,14 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
       })
       .subscribe();
 
-    // 2. Group Call Presence Subscription (Check if call is active)
+    // Group Call Presence Check
     let callChannel: any = null;
     if (isGroup) {
         callChannel = supabase.channel(`group_call:${receiver.id}`)
             .on('presence', { event: 'sync' }, () => {
                 const state = callChannel.presenceState();
-                const callers = Object.values(state).flat();
-                setActiveCallers(callers);
+                const count = Object.keys(state).length;
+                setOngoingCallUsers(count);
             })
             .subscribe();
     }
@@ -107,7 +104,7 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
     else msgQuery = msgQuery.or(`and(sender_id.eq.${user?.id},receiver_id.eq.${receiver.id}),and(sender_id.eq.${receiver.id},receiver_id.eq.${user?.id})`);
     
     const { data: msgs } = await msgQuery;
-
+    
     let calls: any[] = [];
     if (!isGroup) {
         const { data: callLogs } = await supabase.from('calls').select('*')
@@ -139,24 +136,19 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
     e?.preventDefault();
     const content = customContent || newMessage;
     if (!content.trim() && !selectedImage && !fileBlob) return;
-    
     setSending(true);
     let uploadedUrl = null;
-
     try {
         const fileToUpload = fileBlob || selectedImage;
         if (fileToUpload) {
             let ext = 'webm';
-            if (fileToUpload instanceof File) {
-                ext = fileToUpload.name.split('.').pop() || 'png';
-            }
+            if (fileToUpload instanceof File) ext = fileToUpload.name.split('.').pop() || 'png';
             const fileName = `chat_${Date.now()}_${Math.random()}.${ext}`;
             const { error: upErr } = await supabase.storage.from('post_images').upload(fileName, fileToUpload);
             if (upErr) throw upErr;
             const { data } = supabase.storage.from('post_images').getPublicUrl(fileName);
             uploadedUrl = data.publicUrl;
         }
-
         const msgData = {
             sender_id: user?.id,
             receiver_id: isGroup ? null : receiver.id,
@@ -167,13 +159,10 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
             status: 'sent',
             created_at: new Date().toISOString()
         };
-
         setNewMessage(''); setSelectedImage(null); setImagePreview(null); setShowEmoji(false);
         playSound('sent');
-
-        const { error } = await supabase.from('messages').insert(msgData);
-        if (error) throw error;
-    } catch (err) { console.error(err); alert("Failed to send message."); } 
+        await supabase.from('messages').insert(msgData);
+    } catch (err) { console.error(err); alert("Failed to send."); } 
     finally { setSending(false); }
   };
 
@@ -200,25 +189,29 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
             setMediaRecorder(recorder);
             setIsRecording(true);
             timerRef.current = setInterval(() => { setRecordingDuration(prev => prev + 1); }, 1000);
-        } catch(e) { alert("Microphone permission denied."); }
+        } catch(e) { alert("Microphone blocked."); }
     }
   };
 
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files?.[0]) {
-        const file = e.target.files[0];
-        setSelectedImage(file);
-        setImagePreview(URL.createObjectURL(file));
+        setSelectedImage(e.target.files[0]);
+        setImagePreview(URL.createObjectURL(e.target.files[0]));
     }
   };
 
   const scrollToBottom = () => setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
 
   const handleUnsend = async (msgId: string) => {
-    if(window.confirm("Unsend for everyone?")) {
+    if(window.confirm("Unsend message?")) {
         await supabase.from('messages').delete().eq('id', msgId);
         setActiveMenuId(null);
     }
+  };
+
+  const handlePin = async (msg: any) => {
+    await supabase.from('messages').update({ is_pinned: !msg.is_pinned }).eq('id', msg.id);
+    setActiveMenuId(null);
   };
 
   const renderMessageContent = (msg: any, isMe: boolean) => {
@@ -237,25 +230,42 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
     return (
         <div className={`flex ${isMe ? 'justify-end' : 'justify-start'} mb-3 group w-full relative items-end gap-2 px-2`}>
             {!isMe && <Avatar className="w-6 h-6 mb-1"><AvatarImage src={receiver.avatar}/><AvatarFallback>{receiver.name[0]}</AvatarFallback></Avatar>}
+            
             <div className={`relative max-w-[75%] rounded-2xl p-1 overflow-hidden shadow-sm transition-all ${isMe ? 'bg-blue-600 text-white rounded-br-none' : 'bg-white dark:bg-gray-800 border border-border/40 text-foreground rounded-bl-none'}`}>
-                {msg.image_url && msg.type === 'image' && (<img src={msg.image_url} alt="attachment" className="w-full h-auto rounded-xl object-cover max-h-60 min-w-[150px]" loading="lazy"/>)}
+                {msg.is_pinned && <div className="absolute top-1 right-1 z-10"><Pin size={10} className="fill-current rotate-45" /></div>}
+                
+                {msg.image_url && msg.type === 'image' && (<img src={msg.image_url} className="w-full h-auto rounded-xl object-cover max-h-60 min-w-[150px]" loading="lazy"/>)}
                 {msg.type === 'audio' && (<div className="px-3 py-2 flex items-center gap-2 min-w-[200px]"><audio controls src={msg.image_url} className="h-8 w-full" /></div>)}
                 {msg.content && msg.type !== 'image' && msg.type !== 'audio' && (<div className="px-4 py-2 text-sm break-words whitespace-pre-wrap leading-relaxed">{msg.content}</div>)}
+                
                 {isMe && !isGroup && (<div className="absolute bottom-1 right-2">{msg.status === 'seen' ? (<CheckCheck size={14} className="text-blue-200" strokeWidth={3} />) : (<Check size={14} className="text-blue-200/70" />)}</div>)}
             </div>
-            {isMe && <div className={`opacity-0 group-hover:opacity-100 transition-opacity`}><Button variant="ghost" size="icon" className="h-6 w-6 rounded-full" onClick={() => setActiveMenuId(activeMenuId === msg.id ? null : msg.id)}><MoreVertical size={14} /></Button></div>}
-            {activeMenuId === msg.id && (<div className={`absolute bottom-8 ${isMe ? 'right-0' : 'left-8'} bg-popover shadow-xl rounded-lg py-1 w-32 border z-50`}><button onClick={(e) => { e.stopPropagation(); handleUnsend(msg.id); }} className="w-full text-left px-3 py-2 text-sm text-red-500 hover:bg-muted flex gap-2 items-center"><Trash2 size={14} /> Unsend</button></div>)}
+
+            {/* ✅ Fixed Menu Button */}
+            <div className={`opacity-0 group-hover:opacity-100 transition-opacity`}>
+                 <Button variant="ghost" size="icon" className="h-6 w-6 rounded-full" onClick={() => setActiveMenuId(activeMenuId === msg.id ? null : msg.id)}>
+                    <MoreVertical size={14} />
+                 </Button>
+            </div>
+            
+            {/* ✅ Fixed Menu Dropdown (Overflow Safe) */}
+            {activeMenuId === msg.id && (
+                <div className={`absolute bottom-full mb-2 ${isMe ? 'right-0' : 'left-10'} bg-white dark:bg-gray-800 shadow-2xl rounded-xl py-1 w-36 border border-border z-50 animate-in zoom-in-95`}>
+                    <button onClick={(e) => { e.stopPropagation(); handleUnsend(msg.id); }} className="w-full text-left px-4 py-2 text-sm text-red-500 hover:bg-gray-100 dark:hover:bg-gray-700 flex gap-2 items-center transition">
+                        <Trash2 size={14} /> Unsend
+                    </button>
+                    <button onClick={(e) => { e.stopPropagation(); handlePin(msg); }} className="w-full text-left px-4 py-2 text-sm text-foreground hover:bg-gray-100 dark:hover:bg-gray-700 flex gap-2 items-center transition">
+                        <Pin size={14} /> {msg.is_pinned ? 'Unpin' : 'Pin'}
+                    </button>
+                </div>
+            )}
         </div>
     );
   };
 
-  // ✅ Render Group Call Overlay
   if (isGroupCallActive && isGroup) {
     return <GroupCall groupId={receiver.id} onLeave={() => setIsGroupCallActive(false)} />;
   }
-
-  // ✅ Call Status Logic for Header
-  const isCallOngoing = activeCallers.length > 0;
 
   return (
     <div className="flex flex-col h-screen bg-gray-50 dark:bg-gray-950 fixed inset-0 z-[60] transition-colors">
@@ -271,7 +281,7 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
                     <h3 className="font-bold text-sm text-foreground">{receiver.name}</h3>
                     {isGroup ? (
                         <span className="text-xs text-muted-foreground flex items-center gap-1">
-                            {isCallOngoing ? <span className="text-red-500 font-bold animate-pulse">● Live Call</span> : 'Group Chat'}
+                            {ongoingCallUsers > 0 ? <span className="text-red-500 font-bold animate-pulse flex items-center gap-1">● Live ({ongoingCallUsers})</span> : 'Group Chat'}
                         </span>
                     ) : (
                         <span className={`text-xs ${isActive ? 'text-green-600 font-bold' : 'text-muted-foreground'}`}>{isActive ? 'Active now' : 'Offline'}</span>
@@ -280,21 +290,10 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
             </div>
         </div>
         
-        {/* Call Buttons Logic */}
         <div className="flex gap-1 text-primary pr-1">
             {isGroup ? (
-                // ✅ Group Call Button: Changes based on call status
-                <Button 
-                    variant={isCallOngoing ? "default" : "ghost"} 
-                    size={isCallOngoing ? "sm" : "icon"} 
-                    onClick={() => setIsGroupCallActive(true)} 
-                    className={`transition-all ${isCallOngoing ? 'bg-green-600 hover:bg-green-700 text-white px-4 animate-pulse' : 'text-blue-600 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100'}`}
-                >
-                    {isCallOngoing ? (
-                        <span className="flex items-center gap-2 font-bold">Join Call <Video size={18} /></span>
-                    ) : (
-                        <Video size={22} />
-                    )}
+                <Button variant={ongoingCallUsers > 0 ? "default" : "ghost"} size={ongoingCallUsers > 0 ? "sm" : "icon"} onClick={() => setIsGroupCallActive(true)} className={`transition-all ${ongoingCallUsers > 0 ? 'bg-green-600 hover:bg-green-700 text-white px-4 animate-pulse' : 'text-blue-600 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100'}`}>
+                    {ongoingCallUsers > 0 ? <span className="flex items-center gap-2 font-bold">Join Call <Video size={18} /></span> : <Video size={22} />}
                 </Button>
             ) : (
                 <>
