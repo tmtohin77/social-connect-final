@@ -1,12 +1,12 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
-import { ArrowLeft, Send, Phone, Video, Loader2, Image as ImageIcon, Smile, X, Mic, StopCircle, Trash2, Pin, MoreVertical, Check, CheckCheck } from 'lucide-react';
+import { ArrowLeft, Send, Phone, Video, Loader2, Image as ImageIcon, Smile, X, Mic, StopCircle, Trash2, Pin, MoreVertical, Check, CheckCheck, Users } from 'lucide-react';
 import EmojiPicker from 'emoji-picker-react';
 import { formatDistanceToNow } from 'date-fns';
 import { Button } from '../ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar';
-import GroupCall from './GroupCall'; // ✅ Import Group Call
+import GroupCall from './GroupCall';
 
 const playSound = (type: 'message' | 'sent') => {
   const file = type === 'message' 
@@ -33,8 +33,9 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
   const isGroup = receiver.type === 'group';
   const isActive = !isGroup && onlineUsers.has(receiver.id);
 
-  // Group Call State
+  // Group Call States
   const [isGroupCallActive, setIsGroupCallActive] = useState(false);
+  const [activeCallers, setActiveCallers] = useState<any[]>([]);
 
   const [showEmoji, setShowEmoji] = useState(false);
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
@@ -54,7 +55,8 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
     fetchHistory();
     markAsSeen();
 
-    const channel = supabase.channel(`chat:${receiver.id}`)
+    // 1. Message Subscription
+    const chatChannel = supabase.channel(`chat:${receiver.id}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, (payload) => {
         if (payload.eventType === 'DELETE') {
             setMessages(prev => prev.filter(m => m.id !== payload.old.id));
@@ -80,7 +82,23 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
         }
       })
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
+
+    // 2. Group Call Presence Subscription (Check if call is active)
+    let callChannel: any = null;
+    if (isGroup) {
+        callChannel = supabase.channel(`group_call:${receiver.id}`)
+            .on('presence', { event: 'sync' }, () => {
+                const state = callChannel.presenceState();
+                const callers = Object.values(state).flat();
+                setActiveCallers(callers);
+            })
+            .subscribe();
+    }
+
+    return () => { 
+        supabase.removeChannel(chatChannel); 
+        if (callChannel) supabase.removeChannel(callChannel);
+    };
   }, [receiver.id, isGroup, user?.id]);
 
   const fetchHistory = async () => {
@@ -236,6 +254,9 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
     return <GroupCall groupId={receiver.id} onLeave={() => setIsGroupCallActive(false)} />;
   }
 
+  // ✅ Call Status Logic for Header
+  const isCallOngoing = activeCallers.length > 0;
+
   return (
     <div className="flex flex-col h-screen bg-gray-50 dark:bg-gray-950 fixed inset-0 z-[60] transition-colors">
       <div className="bg-white/90 dark:bg-gray-900/90 backdrop-blur-md p-3 shadow-sm flex items-center justify-between border-b border-border/40 shrink-0">
@@ -248,7 +269,13 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
                 </div>
                 <div>
                     <h3 className="font-bold text-sm text-foreground">{receiver.name}</h3>
-                    <span className={`text-xs ${isActive ? 'text-green-600 font-bold' : 'text-muted-foreground'}`}>{isGroup ? 'Group Chat' : (isActive ? 'Active now' : 'Offline')}</span>
+                    {isGroup ? (
+                        <span className="text-xs text-muted-foreground flex items-center gap-1">
+                            {isCallOngoing ? <span className="text-red-500 font-bold animate-pulse">● Live Call</span> : 'Group Chat'}
+                        </span>
+                    ) : (
+                        <span className={`text-xs ${isActive ? 'text-green-600 font-bold' : 'text-muted-foreground'}`}>{isActive ? 'Active now' : 'Offline'}</span>
+                    )}
                 </div>
             </div>
         </div>
@@ -256,9 +283,18 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
         {/* Call Buttons Logic */}
         <div className="flex gap-1 text-primary pr-1">
             {isGroup ? (
-                // ✅ Group Call Button
-                <Button variant="ghost" size="icon" onClick={() => setIsGroupCallActive(true)} className="text-blue-600 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100">
-                    <Video size={22} />
+                // ✅ Group Call Button: Changes based on call status
+                <Button 
+                    variant={isCallOngoing ? "default" : "ghost"} 
+                    size={isCallOngoing ? "sm" : "icon"} 
+                    onClick={() => setIsGroupCallActive(true)} 
+                    className={`transition-all ${isCallOngoing ? 'bg-green-600 hover:bg-green-700 text-white px-4 animate-pulse' : 'text-blue-600 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100'}`}
+                >
+                    {isCallOngoing ? (
+                        <span className="flex items-center gap-2 font-bold">Join Call <Video size={18} /></span>
+                    ) : (
+                        <Video size={22} />
+                    )}
                 </Button>
             ) : (
                 <>
