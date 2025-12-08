@@ -16,6 +16,16 @@ interface PeerStream {
   user?: any;
 }
 
+// ✅ Config for connection
+const peerConfig = {
+  config: {
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:global.stun.twilio.com:3478' }
+    ]
+  }
+};
+
 const GroupCall: React.FC<GroupCallProps> = ({ groupId, onLeave }) => {
   const { user } = useAuth();
   const [myStream, setMyStream] = useState<MediaStream | null>(null);
@@ -26,7 +36,7 @@ const GroupCall: React.FC<GroupCallProps> = ({ groupId, onLeave }) => {
   const [participants, setParticipants] = useState<any[]>([]);
 
   const myVideoRef = useRef<HTMLVideoElement>(null);
-  const peersRef = useRef<PeerStream[]>([]); // To keep track inside callbacks
+  const peersRef = useRef<PeerStream[]>([]);
 
   useEffect(() => {
     initializeCall();
@@ -37,17 +47,15 @@ const GroupCall: React.FC<GroupCallProps> = ({ groupId, onLeave }) => {
 
   const initializeCall = async () => {
     try {
-      // 1. Get User Media
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
       setMyStream(stream);
       if (myVideoRef.current) myVideoRef.current.srcObject = stream;
 
-      // 2. Initialize Peer
-      const peer = new Peer(user?.id + '-' + groupId); // Unique ID per group session
+      // ✅ Updated Peer with Config
+      const peer = new Peer(user?.id + '-' + groupId, peerConfig);
       setMyPeer(peer);
 
       peer.on('open', (id) => {
-        // 3. Join Presence Channel to announce I am here
         const channel = supabase.channel(`group_call:${groupId}`, {
             config: { presence: { key: id } }
         });
@@ -57,7 +65,6 @@ const GroupCall: React.FC<GroupCallProps> = ({ groupId, onLeave }) => {
             const users = Object.values(state).flat() as any[];
             setParticipants(users);
             
-            // Call users who are already there (but not me)
             users.forEach((u: any) => {
                 if (u.presence_ref !== id && !peersRef.current.find(p => p.peerId === u.presence_ref)) {
                    connectToNewUser(u.presence_ref, stream, peer);
@@ -74,7 +81,6 @@ const GroupCall: React.FC<GroupCallProps> = ({ groupId, onLeave }) => {
             }
         });
 
-        // 4. Answer Incoming Calls
         peer.on('call', (call) => {
             call.answer(stream);
             call.on('stream', (userVideoStream) => {
@@ -85,13 +91,11 @@ const GroupCall: React.FC<GroupCallProps> = ({ groupId, onLeave }) => {
 
     } catch (err) {
       console.error("Failed to join group call", err);
-      alert("Could not access camera/microphone");
       onLeave();
     }
   };
 
   const connectToNewUser = (userId: string, stream: MediaStream, peer: Peer) => {
-    // Check if already connected
     if (peersRef.current.find(p => p.peerId === userId)) return;
 
     const call = peer.call(userId, stream);
@@ -140,7 +144,6 @@ const GroupCall: React.FC<GroupCallProps> = ({ groupId, onLeave }) => {
     }
   };
 
-  // Helper to find user info
   const getUserInfo = (peerId: string) => {
     const p = participants.find((part: any) => part.presence_ref === peerId);
     return p || { name: 'User', avatar: '' };
@@ -148,7 +151,6 @@ const GroupCall: React.FC<GroupCallProps> = ({ groupId, onLeave }) => {
 
   return (
     <div className="fixed inset-0 z-[100] bg-gray-950 flex flex-col animate-fade-in">
-      {/* Header */}
       <div className="absolute top-0 left-0 right-0 p-4 z-10 flex justify-between items-center bg-gradient-to-b from-black/70 to-transparent">
         <div className="flex items-center gap-2 text-white">
             <Users size={20} />
@@ -159,12 +161,17 @@ const GroupCall: React.FC<GroupCallProps> = ({ groupId, onLeave }) => {
         </div>
       </div>
 
-      {/* Grid Layout */}
       <div className="flex-1 p-4 grid gap-4 auto-rows-fr grid-cols-1 sm:grid-cols-2 md:grid-cols-3 overflow-y-auto">
         
-        {/* My Video */}
+        {/* ✅ My Video (Mirrored) */}
         <div className="relative bg-gray-900 rounded-2xl overflow-hidden border border-gray-800 shadow-xl group">
-            <video ref={myVideoRef} muted autoPlay playsInline className={`w-full h-full object-cover ${isCameraOff ? 'hidden' : ''}`} />
+            <video 
+                ref={myVideoRef} 
+                muted 
+                autoPlay 
+                playsInline 
+                className={`w-full h-full object-cover scale-x-[-1] ${isCameraOff ? 'hidden' : ''}`} 
+            />
             
             {isCameraOff && (
                 <div className="absolute inset-0 flex items-center justify-center flex-col gap-2">
@@ -180,7 +187,7 @@ const GroupCall: React.FC<GroupCallProps> = ({ groupId, onLeave }) => {
             </div>
         </div>
 
-        {/* Other Participants */}
+        {/* ✅ Remote Videos (Not Mirrored) */}
         {peers.map((peer) => {
             const info = getUserInfo(peer.peerId);
             return (
@@ -197,7 +204,6 @@ const GroupCall: React.FC<GroupCallProps> = ({ groupId, onLeave }) => {
         })}
       </div>
 
-      {/* Controls */}
       <div className="p-6 flex justify-center gap-6 bg-black/40 backdrop-blur-xl border-t border-white/10">
         <button onClick={toggleMute} className={`p-4 rounded-full transition-all active:scale-95 ${isMuted ? 'bg-white text-black' : 'bg-gray-800/80 text-white hover:bg-gray-700'}`}>
           {isMuted ? <MicOff size={24} /> : <Mic size={24} />}
@@ -215,12 +221,12 @@ const GroupCall: React.FC<GroupCallProps> = ({ groupId, onLeave }) => {
   );
 };
 
-// Helper Component for Remote Videos
 const VideoPlayer: React.FC<{ stream: MediaStream }> = ({ stream }) => {
     const ref = useRef<HTMLVideoElement>(null);
     useEffect(() => {
         if (ref.current) ref.current.srcObject = stream;
     }, [stream]);
+    // Remote video should NOT be mirrored
     return <video ref={ref} autoPlay playsInline className="w-full h-full object-cover" />;
 };
 

@@ -3,7 +3,6 @@ import { supabase } from '../lib/supabase';
 import { avatars } from '../data/mockData';
 import Peer from 'peerjs';
 
-// ✅ User Interface
 interface User {
   id: string;
   name: string;
@@ -26,13 +25,22 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+// ✅ FREE STUN Servers (For connecting different networks)
+const peerConfig = {
+  config: {
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:global.stun.twilio.com:3478' }
+    ]
+  }
+};
+
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [onlineUsers, setOnlineUsers] = useState<Set<string>>(new Set());
   const [peer, setPeer] = useState<Peer | null>(null);
 
-  // 1. Session Check & Auth Listener
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
@@ -56,16 +64,15 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return () => subscription.unsubscribe();
   }, []);
 
-  // 2. PeerJS Setup (Call System)
   useEffect(() => {
     if (user) {
-      const newPeer = new Peer(user.id);
+      // ✅ Using Config with STUN servers
+      const newPeer = new Peer(user.id, peerConfig);
       setPeer(newPeer);
       return () => { newPeer.destroy(); };
     }
   }, [user]);
 
-  // 3. Online Presence Setup
   const setupPresence = (userId: string) => {
     const room = supabase.channel('online-users', {
       config: { presence: { key: userId } },
@@ -83,13 +90,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       });
   };
 
-  // 4. Fetch User Profile
   const fetchProfile = async (id: string, email: string) => {
     const { data } = await supabase.from('users').select('*').eq('id', id).single();
     if (data) {
       setUser(data);
     } else {
-      // যদি ডাটাবেসে ইউজার না থাকে (প্রথমবার লগিন), ডিফল্ট ডাটা সেট করি
       setUser({ 
         id, 
         email, 
@@ -101,8 +106,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
     setLoading(false);
   };
-
-  // --- Auth Functions ---
 
   const login = async (email: string, password: string) => {
     return await supabase.auth.signInWithPassword({ email, password });
@@ -122,9 +125,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     });
   };
 
-  // ✅ OTP Verification Fix
   const verifyEmail = async (email: string, token: string) => {
-    // নতুন একাউন্ট ভেরিফাই করার জন্য type: 'signup' ব্যবহার করতে হবে
     const { data, error } = await supabase.auth.verifyOtp({ 
         email, 
         token, 
@@ -132,7 +133,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     });
 
     if (!error && data.session) {
-        // ভেরিফিকেশন সফল হলে সাথে সাথে প্রোফাইল লোড করি
         await fetchProfile(data.session.user.id, email);
     }
     

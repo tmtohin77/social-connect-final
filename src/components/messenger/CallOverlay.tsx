@@ -37,7 +37,7 @@ const CallOverlay: React.FC<CallOverlayProps> = ({ stream, remoteStream, onEndCa
 
   return (
     <div className="fixed inset-0 z-[100] bg-gray-900 flex flex-col animate-fade-in">
-      {/* Remote Video (Full Screen) */}
+      {/* Remote Video (Full Screen) - Not Mirrored */}
       <div className="flex-1 relative overflow-hidden bg-black">
         {remoteStream ? (
           <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full object-cover" />
@@ -55,10 +55,16 @@ const CallOverlay: React.FC<CallOverlayProps> = ({ stream, remoteStream, onEndCa
           </div>
         )}
 
-        {/* My Video (Small Overlay) */}
+        {/* My Video (Small Overlay) - ✅ Mirrored */}
         {isVideo && (
           <div className="absolute top-4 right-4 w-32 h-48 bg-black/50 backdrop-blur-md rounded-2xl overflow-hidden shadow-2xl border border-white/20 transition-all hover:scale-105">
-            <video ref={myVideoRef} autoPlay playsInline muted className={`w-full h-full object-cover ${isCameraOff ? 'hidden' : ''}`} />
+            <video 
+                ref={myVideoRef} 
+                autoPlay 
+                playsInline 
+                muted 
+                className={`w-full h-full object-cover scale-x-[-1] ${isCameraOff ? 'hidden' : ''}`} 
+            />
             {isCameraOff && <div className="w-full h-full flex items-center justify-center text-white text-xs bg-gray-800">Camera Off</div>}
           </div>
         )}
