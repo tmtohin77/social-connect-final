@@ -1,138 +1,160 @@
 import React, { useState, useEffect } from 'react';
-import { X, Users, Check, Loader2 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
+import { X, Check, Loader2, Users } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog';
+import { Button } from '../ui/button';
+import { Input } from '../ui/input';
+import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar';
+import { ScrollArea } from '../ui/scroll-area';
 
-interface CreateGroupProps {
+interface CreateGroupModalProps {
   isOpen: boolean;
   onClose: () => void;
   onGroupCreated: () => void;
 }
 
-const CreateGroupModal: React.FC<CreateGroupProps> = ({ isOpen, onClose, onGroupCreated }) => {
+const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, onGroupCreated }) => {
   const { user } = useAuth();
   const [groupName, setGroupName] = useState('');
   const [friends, setFriends] = useState<any[]>([]);
   const [selectedFriends, setSelectedFriends] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
+  const [fetching, setFetching] = useState(false);
 
   useEffect(() => {
     if (isOpen) fetchFriends();
   }, [isOpen]);
 
   const fetchFriends = async () => {
-    const { data } = await supabase.from('friendships')
-      .select('requester_id, receiver_id')
-      .eq('status', 'accepted')
-      .or(`requester_id.eq.${user?.id},receiver_id.eq.${user?.id}`);
+    setFetching(true);
+    if (!user) return;
+
+    // Fetch friends logic
+    const { data: sent } = await supabase.from('friendships').select('receiver_id').eq('requester_id', user.id).eq('status', 'accepted');
+    const { data: received } = await supabase.from('friendships').select('requester_id').eq('receiver_id', user.id).eq('status', 'accepted');
     
-    if (data) {
-      const ids = new Set<string>();
-      data.forEach(f => ids.add(f.requester_id === user?.id ? f.receiver_id : f.requester_id));
-      
-      if (ids.size > 0) {
-        const { data: users } = await supabase.from('users').select('*').in('id', Array.from(ids));
-        if (users) setFriends(users);
-      }
+    const friendIds = new Set<string>();
+    sent?.forEach(f => friendIds.add(f.receiver_id));
+    received?.forEach(f => friendIds.add(f.requester_id));
+
+    if (friendIds.size > 0) {
+      const { data } = await supabase.from('users').select('*').in('id', Array.from(friendIds));
+      if (data) setFriends(data);
     }
+    setFetching(false);
   };
 
   const toggleSelect = (id: string) => {
-    const newSet = new Set(selectedFriends);
-    if (newSet.has(id)) newSet.delete(id);
-    else newSet.add(id);
-    setSelectedFriends(newSet);
+    const newSelected = new Set(selectedFriends);
+    if (newSelected.has(id)) newSelected.delete(id);
+    else newSelected.add(id);
+    setSelectedFriends(newSelected);
   };
 
   const handleCreate = async () => {
-    // ✅ Fix: User check added here
-    if (!groupName.trim() || selectedFriends.size === 0 || !user) return;
-    
+    if (!groupName.trim() || selectedFriends.size === 0) return;
     setLoading(true);
 
     try {
-      // ১. গ্রুপ তৈরি
-      const { data: groupData, error } = await supabase
+      // 1. Create Group
+      const { data: groupData, error: groupError } = await supabase
         .from('groups')
         .insert({
           name: groupName,
-          created_by: user.id,
+          created_by: user?.id,
           avatar: `https://api.dicebear.com/7.x/initials/svg?seed=${groupName}`
         })
         .select()
         .single();
 
-      if (error) throw error;
+      if (groupError) throw groupError;
 
-      // ২. মেম্বার অ্যাড করা (নিজেকে এবং বন্ধুদের)
-      const members = Array.from(selectedFriends).map(fid => ({ 
-        group_id: groupData.id, 
-        user_id: fid 
+      // 2. Add Members (Creator + Selected Friends)
+      const members = Array.from(selectedFriends).map(friendId => ({
+        group_id: groupData.id,
+        user_id: friendId
       }));
 
-      // ✅ Fix: No error here now, because we checked 'user' above
-      members.push({ group_id: groupData.id, user_id: user.id }); 
+      // Add myself to the group
+      members.push({
+        group_id: groupData.id,
+        user_id: user!.id
+      });
 
-      await supabase.from('group_members').insert(members);
+      const { error: memberError } = await supabase.from('group_members').insert(members);
 
-      onGroupCreated();
-      onClose();
+      if (memberError) throw memberError;
+
+      // Success
       setGroupName('');
       setSelectedFriends(new Set());
-    } catch (err) {
-      console.error(err);
-      alert('Failed to create group');
+      onGroupCreated();
+      onClose();
+
+    } catch (error: any) {
+      console.error('Error creating group:', error);
+      alert(`Failed to create group: ${error.message}`);
     } finally {
       setLoading(false);
     }
   };
 
-  if (!isOpen) return null;
-
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-fade-in p-4">
-      <div className="bg-white dark:bg-gray-800 w-full max-w-md rounded-2xl shadow-xl overflow-hidden flex flex-col max-h-[80vh]">
-        <div className="p-4 border-b dark:border-gray-700 flex justify-between items-center">
-          <h2 className="text-lg font-bold dark:text-white">Create Group</h2>
-          <button onClick={onClose}><X className="dark:text-white" /></button>
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="sm:max-w-[425px]">
+        <DialogHeader>
+          <DialogTitle>Create New Group</DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-4 py-4">
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Group Name</label>
+            <Input 
+              placeholder="e.g. Chill Zone" 
+              value={groupName}
+              onChange={(e) => setGroupName(e.target.value)}
+            />
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Select Members ({selectedFriends.size})</label>
+            <ScrollArea className="h-[200px] border rounded-md p-2">
+                {fetching ? (
+                    <div className="flex justify-center p-4"><Loader2 className="animate-spin"/></div>
+                ) : friends.length === 0 ? (
+                    <p className="text-center text-muted-foreground text-sm p-4">No friends found.</p>
+                ) : (
+                    friends.map(friend => (
+                        <div 
+                            key={friend.id} 
+                            onClick={() => toggleSelect(friend.id)}
+                            className={`flex items-center justify-between p-2 rounded-lg cursor-pointer transition-colors ${selectedFriends.has(friend.id) ? 'bg-blue-50 dark:bg-blue-900/20' : 'hover:bg-gray-100 dark:hover:bg-gray-800'}`}
+                        >
+                            <div className="flex items-center gap-3">
+                                <Avatar className="w-8 h-8">
+                                    <AvatarImage src={friend.avatar} />
+                                    <AvatarFallback>{friend.name[0]}</AvatarFallback>
+                                </Avatar>
+                                <span className="text-sm font-medium">{friend.name}</span>
+                            </div>
+                            {selectedFriends.has(friend.id) && <Check size={16} className="text-blue-600" />}
+                        </div>
+                    ))
+                )}
+            </ScrollArea>
+          </div>
         </div>
 
-        <div className="p-4 border-b dark:border-gray-700">
-          <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Group Name</label>
-          <input 
-            value={groupName}
-            onChange={(e) => setGroupName(e.target.value)}
-            placeholder="Ex: Weekend Plan"
-            className="w-full mt-1 p-3 bg-gray-100 dark:bg-gray-700 rounded-xl focus:outline-blue-500 dark:text-white border-none"
-          />
-        </div>
-
-        <div className="p-2 flex-1 overflow-y-auto">
-          <p className="px-2 text-xs text-gray-500 mb-2">Select Members ({selectedFriends.size})</p>
-          {friends.length === 0 ? (
-             <p className="text-center text-gray-400 py-4">No friends found to add.</p>
-          ) : (
-            friends.map(f => (
-                <div key={f.id} onClick={() => toggleSelect(f.id)} className="flex items-center justify-between p-2 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-xl cursor-pointer">
-                <div className="flex items-center gap-3">
-                    <img src={f.avatar} className="w-10 h-10 rounded-full border object-cover" />
-                    <span className="font-bold dark:text-white">{f.name}</span>
-                </div>
-                <div className={`w-5 h-5 rounded-full border flex items-center justify-center ${selectedFriends.has(f.id) ? 'bg-blue-600 border-blue-600' : 'border-gray-400'}`}>
-                    {selectedFriends.has(f.id) && <Check size={12} className="text-white" />}
-                </div>
-                </div>
-            ))
-          )}
-        </div>
-
-        <div className="p-4 border-t dark:border-gray-700">
-          <button onClick={handleCreate} disabled={loading || !groupName.trim() || selectedFriends.size === 0} className="w-full py-3 bg-blue-600 text-white rounded-xl font-bold flex justify-center items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-blue-700 transition">
-            {loading ? <Loader2 className="animate-spin" /> : <><Users size={20} /> Create Group</>}
-          </button>
-        </div>
-      </div>
-    </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button onClick={handleCreate} disabled={loading || !groupName || selectedFriends.size === 0}>
+            {loading ? <Loader2 className="animate-spin mr-2"/> : <Users className="mr-2 h-4 w-4"/>}
+            Create Group
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 };
 
