@@ -14,45 +14,53 @@ interface CreatePostProps {
 const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated }) => {
   const { user } = useAuth();
   const [content, setContent] = useState('');
-  const [image, setImage] = useState<File | null>(null);
+  const [mediaFile, setMediaFile] = useState<File | null>(null);
+  const [mediaType, setMediaType] = useState<'image' | 'video' | null>(null);
   const [loading, setLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-      setImage(e.target.files[0]);
+      const file = e.target.files[0];
+      const type = file.type.startsWith('video/') ? 'video' : 'image';
+      setMediaFile(file);
+      setMediaType(type);
     }
   };
 
   const handleSubmit = async () => {
-    if (!content.trim() && !image) return;
+    if (!content.trim() && !mediaFile) return;
     setLoading(true);
 
     try {
-      let imageUrl = null;
-      if (image) {
-        const fileExt = image.name.split('.').pop();
-        const fileName = `${Math.random()}.${fileExt}`;
-        const { error: uploadError } = await supabase.storage.from('post_images').upload(fileName, image);
+      let mediaUrl = null;
+      if (mediaFile) {
+        const fileExt = mediaFile.name.split('.').pop();
+        const fileName = `${mediaType}_${Date.now()}_${Math.random()}.${fileExt}`;
+        const { error: uploadError } = await supabase.storage.from('post_images').upload(fileName, mediaFile);
+        
         if (uploadError) throw uploadError;
+        
         const { data } = supabase.storage.from('post_images').getPublicUrl(fileName);
-        imageUrl = data.publicUrl;
+        mediaUrl = data.publicUrl;
       }
 
       const { error: dbError } = await supabase.from('posts').insert({
           user_id: user?.id,
           content: content,
-          image_url: imageUrl
+          image_url: mediaUrl // আমরা একই কলাম ব্যবহার করছি, কিন্তু ভিডিও হলে এক্সটেনশন দেখে বুঝব
         });
 
       if (dbError) throw dbError;
 
       setContent('');
-      setImage(null);
+      setMediaFile(null);
+      setMediaType(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
       onPostCreated();
 
-    } catch (error) { console.error(error); } finally { setLoading(false); }
+    } catch (error) { console.error(error); alert('Failed to post. Check internet.'); } 
+    finally { setLoading(false); }
   };
 
   return (
@@ -72,10 +80,14 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated }) => {
               className="bg-gray-50 dark:bg-gray-900 border-none resize-none focus-visible:ring-1 min-h-[80px]"
             />
             
-            {image && (
-                <div className="relative rounded-xl overflow-hidden bg-gray-100">
-                    <img src={URL.createObjectURL(image)} alt="Preview" className="w-full max-h-60 object-contain" />
-                    <button onClick={() => setImage(null)} className="absolute top-2 right-2 bg-black/60 text-white p-1 rounded-full hover:bg-black/80 transition">
+            {mediaFile && (
+                <div className="relative rounded-xl overflow-hidden bg-gray-100 dark:bg-gray-900 border border-border/50">
+                    {mediaType === 'video' ? (
+                        <video src={URL.createObjectURL(mediaFile)} controls className="w-full max-h-60 object-contain" />
+                    ) : (
+                        <img src={URL.createObjectURL(mediaFile)} alt="Preview" className="w-full max-h-60 object-contain" />
+                    )}
+                    <button onClick={() => { setMediaFile(null); setMediaType(null); }} className="absolute top-2 right-2 bg-black/60 text-white p-1 rounded-full hover:bg-black/80 transition">
                         <X size={16} />
                     </button>
                 </div>
@@ -86,7 +98,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated }) => {
                     <Button variant="ghost" size="sm" onClick={() => fileInputRef.current?.click()} className="text-gray-500 hover:text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20">
                         <Image size={18} className="mr-2" /> Photo
                     </Button>
-                    <Button variant="ghost" size="sm" className="text-gray-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20">
+                    <Button variant="ghost" size="sm" onClick={() => fileInputRef.current?.click()} className="text-gray-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20">
                         <Video size={18} className="mr-2" /> Video
                     </Button>
                     <Button variant="ghost" size="sm" className="hidden sm:flex text-gray-500 hover:text-yellow-600 hover:bg-yellow-50 dark:hover:bg-yellow-900/20">
@@ -94,9 +106,10 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated }) => {
                     </Button>
                 </div>
 
-                <input type="file" ref={fileInputRef} onChange={handleImageSelect} className="hidden" accept="image/*" />
+                {/* Accept Images AND Videos */}
+                <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" accept="image/*,video/*" />
 
-                <Button onClick={handleSubmit} disabled={loading || (!content && !image)} className="bg-blue-600 hover:bg-blue-700 text-white rounded-full px-6">
+                <Button onClick={handleSubmit} disabled={loading || (!content && !mediaFile)} className="bg-blue-600 hover:bg-blue-700 text-white rounded-full px-6">
                     {loading ? <Loader2 size={18} className="animate-spin" /> : <><Send size={16} className="mr-2" /> Post</>}
                 </Button>
             </div>

@@ -9,7 +9,6 @@ import NotificationsModal from '../components/notifications/NotificationsModal';
 import BottomTabs from '../components/shared/BottomTabs';
 import { Loader2, Bell, MessageCircle, Heart, Send, X, Trash2, Eye } from 'lucide-react';
 import { appLogo } from '../data/mockData';
-import { ScrollArea } from '../components/ui/scroll-area';
 import { Button } from '../components/ui/button';
 
 interface HomeScreenProps {
@@ -17,7 +16,6 @@ interface HomeScreenProps {
   onViewProfile: (userId: string) => void;
 }
 
-// Story Viewer Interface
 interface StoryViewData {
   id: string;
   url: string;
@@ -33,18 +31,19 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onOpenChat, onViewProfile }) =>
   const [loading, setLoading] = useState(true);
   const [uploadingStory, setUploadingStory] = useState(false);
   
-  // Modals States
   const [showComments, setShowComments] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [selectedPostId, setSelectedPostId] = useState('');
   
-  // Story View States
   const [viewStory, setViewStory] = useState<StoryViewData | null>(null);
   const [viewers, setViewers] = useState<any[]>([]);
   const [showViewersModal, setShowViewersModal] = useState(false);
   const [storyProgress, setStoryProgress] = useState(0);
 
   const storyInputRef = useRef<HTMLInputElement>(null);
+
+  // Helper to check video
+  const isVideo = (url: string) => url?.match(/\.(mp4|webm|ogg)$/i);
 
   useEffect(() => {
     if (user) {
@@ -53,20 +52,25 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onOpenChat, onViewProfile }) =>
     }
   }, [user]);
 
-  // Story Progress Effect
+  // Story Progress & Video Duration Logic
   useEffect(() => {
     let interval: any;
     if (viewStory) {
       setStoryProgress(0);
+      const isVid = isVideo(viewStory.url);
+      const duration = isVid ? 15000 : 5000; // Video 15s, Image 5s default
+      
+      const step = 100 / (duration / 50);
+
       interval = setInterval(() => {
         setStoryProgress(prev => {
           if (prev >= 100) {
             setViewStory(null);
             return 0;
           }
-          return prev + 1;
+          return prev + step;
         });
-      }, 50); // 5 seconds duration
+      }, 50);
     }
     return () => clearInterval(interval);
   }, [viewStory]);
@@ -106,7 +110,9 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onOpenChat, onViewProfile }) =>
     setUploadingStory(true);
     try {
       const file = e.target.files[0];
-      const fileName = `story_${user?.id}_${Date.now()}`;
+      const ext = file.name.split('.').pop();
+      const fileName = `story_${user?.id}_${Date.now()}.${ext}`;
+      
       await supabase.storage.from('stories').upload(fileName, file);
       const { data } = supabase.storage.from('stories').getPublicUrl(fileName);
       await supabase.from('stories').insert({ user_id: user?.id, image_url: data.publicUrl });
@@ -137,7 +143,6 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onOpenChat, onViewProfile }) =>
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 pb-24 transition-colors duration-300">
       
-      {/* Top Header */}
       <div className="bg-white/80 dark:bg-gray-900/80 backdrop-blur-md p-4 sticky top-0 z-40 flex justify-between items-center border-b border-border/40">
         <div className="flex items-center gap-2">
             <div className="w-9 h-9 bg-gradient-to-br from-blue-600 to-purple-600 rounded-xl p-[2px]">
@@ -158,22 +163,19 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onOpenChat, onViewProfile }) =>
       </div>
 
       <div className="max-w-xl mx-auto pt-4">
-        {/* Stories Section */}
         <div className="bg-white dark:bg-gray-800 py-6 border-y border-border/40 mb-6 overflow-x-auto no-scrollbar flex gap-4 px-4 shadow-sm">
             <div className="relative">
                 <StoryCircle user={{ name: "You", avatar: user?.avatar }} isAddStory onClick={() => storyInputRef.current?.click()} />
-                <input type="file" ref={storyInputRef} hidden accept="image/*" onChange={handleStoryUpload} />
+                <input type="file" ref={storyInputRef} hidden accept="image/*,video/*" onChange={handleStoryUpload} />
                 {uploadingStory && <div className="absolute inset-0 bg-white/80 rounded-full flex items-center justify-center"><Loader2 className="animate-spin text-blue-600" size={24} /></div>}
             </div>
             {stories.map((story) => <StoryCircle key={story.id} user={story.users} onClick={() => handleViewStory(story)} />)}
         </div>
 
-        {/* Create Post */}
         <div className="px-4 mb-6">
             <CreatePost onPostCreated={fetchPosts} />
         </div>
 
-        {/* Feed */}
         <div className="px-4 space-y-6">
             {loading ? <div className="flex justify-center py-12"><Loader2 className="animate-spin text-primary" size={32} /></div> : 
             posts.length === 0 ? <div className="text-center py-16 text-muted-foreground bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-border/40">
@@ -184,19 +186,15 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onOpenChat, onViewProfile }) =>
         </div>
       </div>
 
-      {/* Modals */}
       <CommentModal isOpen={showComments} onClose={() => setShowComments(false)} postId={selectedPostId} />
       <NotificationsModal isOpen={showNotifications} onClose={() => setShowNotifications(false)} onNavigate={(type, id) => { if (type === 'profile' && onViewProfile) onViewProfile(id); }} />
 
-      {/* Story Viewer Overlay */}
       {viewStory && (
         <div className="fixed inset-0 z-[100] bg-black flex flex-col items-center justify-center animate-fade-in">
-            {/* Progress Bar */}
             <div className="absolute top-4 left-4 right-4 h-1 bg-white/20 rounded-full overflow-hidden z-50">
                 <div className="h-full bg-white transition-all ease-linear duration-100" style={{ width: `${storyProgress}%` }}></div>
             </div>
 
-            {/* Header */}
             <div className="absolute top-8 left-4 right-4 flex justify-between items-center z-50">
                 <div className="flex items-center gap-3">
                     <img src={viewStory.user?.avatar || user?.avatar} className="w-10 h-10 rounded-full border-2 border-white object-cover" />
@@ -210,10 +208,12 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onOpenChat, onViewProfile }) =>
                 </button>
             </div>
 
-            {/* Main Image */}
-            <img src={viewStory.url} className="w-full h-full object-contain max-h-[85vh] animate-scale-up" />
+            {isVideo(viewStory.url) ? (
+                 <video src={viewStory.url} className="w-full h-full object-contain max-h-[85vh] animate-scale-up" autoPlay playsInline />
+            ) : (
+                 <img src={viewStory.url} className="w-full h-full object-contain max-h-[85vh] animate-scale-up" />
+            )}
 
-            {/* Footer Controls */}
             <div className="absolute bottom-6 w-full px-4 z-50">
                 {viewStory.isMine ? (
                     <div className="flex justify-between items-center bg-black/40 backdrop-blur-md p-3 rounded-2xl border border-white/10">

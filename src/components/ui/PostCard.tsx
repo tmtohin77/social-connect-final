@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Heart, MessageCircle, Share2, MoreHorizontal, Bookmark, Trash2, X } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Heart, MessageCircle, Share2, MoreHorizontal, Bookmark, Trash2, X, Play, Pause, Volume2, VolumeX } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
@@ -21,9 +21,19 @@ const PostCard: React.FC<PostCardProps> = ({ post, onCommentClick, onProfileClic
   const [likeCount, setLikeCount] = useState(post.likes_count || 0);
   const [showMenu, setShowMenu] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
+  
+  // Video Controls
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isMuted, setIsMuted] = useState(true);
+  const videoRef = useRef<HTMLVideoElement>(null);
 
   const isShared = !!post.original_post;
   const displayPost = isShared ? post.original_post : post;
+
+  // Check if media is video based on extension
+  const isVideo = (url: string) => {
+    return url?.match(/\.(mp4|webm|ogg)$/i);
+  };
 
   useEffect(() => {
     if (user) checkLikeStatus();
@@ -52,7 +62,14 @@ const PostCard: React.FC<PostCardProps> = ({ post, onCommentClick, onProfileClic
     setShowMenu(false);
   };
 
-  // Shared Content Design
+  const toggleVideo = () => {
+    if (videoRef.current) {
+        if (isPlaying) videoRef.current.pause();
+        else videoRef.current.play();
+        setIsPlaying(!isPlaying);
+    }
+  };
+
   const SharedContent = () => (
     <div className="mt-3 border border-border rounded-xl overflow-hidden bg-gray-50 dark:bg-gray-900/50">
       <div className="p-3 flex items-center gap-2 border-b border-border/50">
@@ -67,7 +84,13 @@ const PostCard: React.FC<PostCardProps> = ({ post, onCommentClick, onProfileClic
       <div className="p-3">
          {displayPost.content && <p className="text-sm text-foreground/90 whitespace-pre-wrap">{displayPost.content}</p>}
       </div>
-      {displayPost.image_url && <img src={displayPost.image_url} className="w-full h-auto object-cover" />}
+      {displayPost.image_url && (
+         isVideo(displayPost.image_url) ? (
+            <video src={displayPost.image_url} controls className="w-full h-auto object-cover" />
+         ) : (
+            <img src={displayPost.image_url} className="w-full h-auto object-cover" />
+         )
+      )}
     </div>
   );
 
@@ -118,8 +141,34 @@ const PostCard: React.FC<PostCardProps> = ({ post, onCommentClick, onProfileClic
           <SharedContent />
         ) : (
           post.image_url && (
-            <div className="rounded-xl overflow-hidden border border-border/50 bg-gray-100 dark:bg-gray-900">
-                <img src={post.image_url} className="w-full h-auto max-h-[500px] object-cover" loading="lazy" />
+            <div className="rounded-xl overflow-hidden border border-border/50 bg-black relative group">
+                {isVideo(post.image_url) ? (
+                    <>
+                        <video 
+                            ref={videoRef}
+                            src={post.image_url} 
+                            className="w-full h-auto max-h-[500px] object-contain" 
+                            loop 
+                            muted={isMuted}
+                            onClick={toggleVideo}
+                        />
+                        {/* Custom Video Controls */}
+                        <div className="absolute bottom-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button onClick={(e) => {e.stopPropagation(); setIsMuted(!isMuted)}} className="p-2 bg-black/50 text-white rounded-full hover:bg-black/70">
+                                {isMuted ? <VolumeX size={16}/> : <Volume2 size={16}/>}
+                            </button>
+                        </div>
+                        {!isPlaying && (
+                             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                <div className="bg-black/50 p-4 rounded-full backdrop-blur-sm">
+                                    <Play size={32} className="text-white fill-white ml-1" />
+                                </div>
+                             </div>
+                        )}
+                    </>
+                ) : (
+                    <img src={post.image_url} className="w-full h-auto max-h-[500px] object-cover" loading="lazy" />
+                )}
             </div>
           )
         )}
