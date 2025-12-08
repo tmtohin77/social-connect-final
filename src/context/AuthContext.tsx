@@ -3,14 +3,14 @@ import { supabase } from '../lib/supabase';
 import { avatars } from '../data/mockData';
 import Peer from 'peerjs';
 
-// ✅ User Interface Updated (Optional Fields Added)
+// ✅ User Interface
 interface User {
   id: string;
   name: string;
   email: string;
   avatar: string;
-  bio?: string;        // Optional
-  cover_photo?: string; // Optional (Matches DB column name)
+  bio?: string;
+  cover_photo?: string;
 }
 
 interface AuthContextType {
@@ -32,6 +32,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [onlineUsers, setOnlineUsers] = useState<Set<string>>(new Set());
   const [peer, setPeer] = useState<Peer | null>(null);
 
+  // 1. Session Check & Auth Listener
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
@@ -55,6 +56,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return () => subscription.unsubscribe();
   }, []);
 
+  // 2. PeerJS Setup (Call System)
   useEffect(() => {
     if (user) {
       const newPeer = new Peer(user.id);
@@ -63,6 +65,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   }, [user]);
 
+  // 3. Online Presence Setup
   const setupPresence = (userId: string) => {
     const room = supabase.channel('online-users', {
       config: { presence: { key: userId } },
@@ -80,23 +83,26 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       });
   };
 
+  // 4. Fetch User Profile
   const fetchProfile = async (id: string, email: string) => {
     const { data } = await supabase.from('users').select('*').eq('id', id).single();
     if (data) {
       setUser(data);
     } else {
-      // ✅ Fix: Provide all required fields or rely on optional types
+      // যদি ডাটাবেসে ইউজার না থাকে (প্রথমবার লগিন), ডিফল্ট ডাটা সেট করি
       setUser({ 
         id, 
         email, 
         name: email.split('@')[0], 
         avatar: avatars.men[0],
-        bio: '',         // Default empty
-        cover_photo: ''  // Default empty
+        bio: '',
+        cover_photo: ''
       });
     }
     setLoading(false);
   };
+
+  // --- Auth Functions ---
 
   const login = async (email: string, password: string) => {
     return await supabase.auth.signInWithPassword({ email, password });
@@ -106,20 +112,30 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return await supabase.auth.signUp({
       email: formData.contact,
       password: formData.password,
-      options: { data: { name: formData.name, age: formData.age, gender: formData.gender } }
+      options: { 
+        data: { 
+          name: formData.name, 
+          age: formData.age, 
+          gender: formData.gender 
+        } 
+      }
     });
   };
 
+  // ✅ OTP Verification Fix
   const verifyEmail = async (email: string, token: string) => {
-    let { error } = await supabase.auth.verifyOtp({ email, token, type: 'email' });
-    if (error) {
-       const retry = await supabase.auth.verifyOtp({ email, token, type: 'signup' });
-       error = retry.error;
+    // নতুন একাউন্ট ভেরিফাই করার জন্য type: 'signup' ব্যবহার করতে হবে
+    const { data, error } = await supabase.auth.verifyOtp({ 
+        email, 
+        token, 
+        type: 'signup' 
+    });
+
+    if (!error && data.session) {
+        // ভেরিফিকেশন সফল হলে সাথে সাথে প্রোফাইল লোড করি
+        await fetchProfile(data.session.user.id, email);
     }
-    if (!error) {
-        const { data } = await supabase.auth.getSession();
-        if (data.session) await fetchProfile(data.session.user.id, email);
-    }
+    
     return { error };
   };
 
