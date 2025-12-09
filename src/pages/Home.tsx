@@ -6,10 +6,11 @@ import CreatePost from '../components/home/CreatePost';
 import StoryCircle from '../components/home/StoryCircle';
 import CommentModal from '../components/home/CommentModal';
 import NotificationsModal from '../components/notifications/NotificationsModal';
-import BottomTabs from '../components/shared/BottomTabs';
-import { Loader2, Bell, MessageCircle, Heart, Send, X, Trash2, Eye } from 'lucide-react';
+import { Loader2, Bell, MessageCircle, Heart, Send, X, Trash2, Eye, MoreHorizontal } from 'lucide-react';
 import { appLogo } from '../data/mockData';
 import { Button } from '../components/ui/button';
+import { Input } from '../components/ui/input';
+import { Avatar, AvatarFallback, AvatarImage } from '../components/ui/avatar';
 
 interface HomeScreenProps {
   onOpenChat: () => void;
@@ -35,10 +36,13 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onOpenChat, onViewProfile }) =>
   const [showNotifications, setShowNotifications] = useState(false);
   const [selectedPostId, setSelectedPostId] = useState('');
   
+  // Story View States
   const [viewStory, setViewStory] = useState<StoryViewData | null>(null);
   const [viewers, setViewers] = useState<any[]>([]);
   const [showViewersModal, setShowViewersModal] = useState(false);
   const [storyProgress, setStoryProgress] = useState(0);
+  const [replyText, setReplyText] = useState('');
+  const [sendingReply, setSendingReply] = useState(false);
 
   const storyInputRef = useRef<HTMLInputElement>(null);
 
@@ -65,7 +69,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onOpenChat, onViewProfile }) =>
       interval = setInterval(() => {
         setStoryProgress(prev => {
           if (prev >= 100) {
-            setViewStory(null);
+            setViewStory(null); // Auto close
             return 0;
           }
           return prev + step;
@@ -132,17 +136,58 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onOpenChat, onViewProfile }) =>
     if (data) setViewers(data);
   };
 
+  // ✅ Fixed Story Deletion
   const deleteStory = async (storyId: string) => {
-    if (window.confirm("Delete this story?")) {
-        await supabase.from('stories').delete().eq('id', storyId);
-        setViewStory(null);
-        fetchStories();
+    if (window.confirm("Delete this story? This cannot be undone.")) {
+        // 1. Delete from DB
+        const { error } = await supabase.from('stories').delete().eq('id', storyId);
+        
+        if (!error) {
+            setViewStory(null); // Close viewer
+            fetchStories(); // Refresh list
+        } else {
+            alert("Failed to delete story.");
+        }
+    }
+  };
+
+  // ✅ Fixed Story Reply (Sends to Inbox)
+  const handleSendReply = async (e?: React.FormEvent, customText?: string) => {
+    e?.preventDefault();
+    const text = customText || replyText;
+    
+    if (!text.trim() || !viewStory) return;
+    setSendingReply(true);
+
+    try {
+        const msgData = {
+            sender_id: user?.id,
+            receiver_id: viewStory.userId, // Send to story owner
+            content: `Replied to story: ${text}`,
+            type: 'text',
+            image_url: viewStory.url, // Attach story image context
+            status: 'sent',
+            created_at: new Date().toISOString()
+        };
+
+        const { error } = await supabase.from('messages').insert(msgData);
+        if (!error) {
+            setReplyText('');
+            alert("Reply sent!");
+        } else {
+            console.error(error);
+        }
+    } catch (error) {
+        console.error(error);
+    } finally {
+        setSendingReply(false);
     }
   };
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 pb-24 transition-colors duration-300">
       
+      {/* Header */}
       <div className="bg-white/80 dark:bg-gray-900/80 backdrop-blur-md p-4 sticky top-0 z-40 flex justify-between items-center border-b border-border/40">
         <div className="flex items-center gap-2">
             <div className="w-9 h-9 bg-gradient-to-br from-blue-600 to-purple-600 rounded-xl p-[2px]">
@@ -163,6 +208,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onOpenChat, onViewProfile }) =>
       </div>
 
       <div className="max-w-xl mx-auto pt-4">
+        {/* Stories Section */}
         <div className="bg-white dark:bg-gray-800 py-6 border-y border-border/40 mb-6 overflow-x-auto no-scrollbar flex gap-4 px-4 shadow-sm">
             <div className="relative">
                 <StoryCircle user={{ name: "You", avatar: user?.avatar }} isAddStory onClick={() => storyInputRef.current?.click()} />
@@ -172,10 +218,12 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onOpenChat, onViewProfile }) =>
             {stories.map((story) => <StoryCircle key={story.id} user={story.users} onClick={() => handleViewStory(story)} />)}
         </div>
 
+        {/* Create Post */}
         <div className="px-4 mb-6">
             <CreatePost onPostCreated={fetchPosts} />
         </div>
 
+        {/* Feed */}
         <div className="px-4 space-y-6">
             {loading ? <div className="flex justify-center py-12"><Loader2 className="animate-spin text-primary" size={32} /></div> : 
             posts.length === 0 ? <div className="text-center py-16 text-muted-foreground bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-border/40">
@@ -186,47 +234,79 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onOpenChat, onViewProfile }) =>
         </div>
       </div>
 
+      {/* Modals */}
       <CommentModal isOpen={showComments} onClose={() => setShowComments(false)} postId={selectedPostId} />
       <NotificationsModal isOpen={showNotifications} onClose={() => setShowNotifications(false)} onNavigate={(type, id) => { if (type === 'profile' && onViewProfile) onViewProfile(id); }} />
 
+      {/* ✅ Full Screen Story Viewer (Facebook Style) */}
       {viewStory && (
-        <div className="fixed inset-0 z-[100] bg-black flex flex-col items-center justify-center animate-fade-in">
-            <div className="absolute top-4 left-4 right-4 h-1 bg-white/20 rounded-full overflow-hidden z-50">
-                <div className="h-full bg-white transition-all ease-linear duration-100" style={{ width: `${storyProgress}%` }}></div>
+        <div className="fixed inset-0 z-[100] bg-black flex flex-col justify-between animate-fade-in">
+            {/* Progress Bar */}
+            <div className="absolute top-0 left-0 right-0 p-2 z-50">
+                <div className="flex gap-1 h-1 bg-white/30 rounded-full overflow-hidden">
+                    <div className="h-full bg-white transition-all ease-linear duration-100" style={{ width: `${storyProgress}%` }}></div>
+                </div>
             </div>
 
-            <div className="absolute top-8 left-4 right-4 flex justify-between items-center z-50">
+            {/* Header */}
+            <div className="absolute top-4 left-0 right-0 px-4 flex justify-between items-center z-50">
                 <div className="flex items-center gap-3">
-                    <img src={viewStory.user?.avatar || user?.avatar} className="w-10 h-10 rounded-full border-2 border-white object-cover" />
-                    <div className="text-white">
+                    <Avatar className="w-10 h-10 border-2 border-blue-500">
+                        <AvatarImage src={viewStory.user?.avatar || user?.avatar} />
+                        <AvatarFallback>U</AvatarFallback>
+                    </Avatar>
+                    <div className="text-white drop-shadow-md">
                         <p className="font-bold text-sm">{viewStory.user?.name || user?.name}</p>
-                        <p className="text-xs opacity-70">Just now</p>
+                        <p className="text-xs opacity-80">Just now</p>
                     </div>
                 </div>
-                <button className="text-white/80 hover:text-white bg-white/10 p-2 rounded-full backdrop-blur-md" onClick={() => setViewStory(null)}>
-                    <X size={24} />
-                </button>
+                <div className="flex items-center gap-2">
+                    {viewStory.isMine && (
+                        <button onClick={() => deleteStory(viewStory.id)} className="text-white hover:bg-white/20 p-2 rounded-full transition">
+                            <Trash2 size={20} />
+                        </button>
+                    )}
+                    <button onClick={() => setViewStory(null)} className="text-white hover:bg-white/20 p-2 rounded-full transition">
+                        <X size={24} />
+                    </button>
+                </div>
             </div>
 
-            {isVideo(viewStory.url) ? (
-                 <video src={viewStory.url} className="w-full h-full object-contain max-h-[85vh] animate-scale-up" autoPlay playsInline />
-            ) : (
-                 <img src={viewStory.url} className="w-full h-full object-contain max-h-[85vh] animate-scale-up" />
-            )}
+            {/* Main Content */}
+            <div className="flex-1 flex items-center justify-center bg-black relative w-full h-full">
+                {isVideo(viewStory.url) ? (
+                     <video src={viewStory.url} className="w-full h-full object-contain max-h-[85vh]" autoPlay playsInline />
+                ) : (
+                     <img src={viewStory.url} className="w-full h-full object-contain max-h-[85vh]" />
+                )}
+            </div>
 
-            <div className="absolute bottom-6 w-full px-4 z-50">
+            {/* ✅ Footer Controls (Facebook Style) */}
+            <div className="absolute bottom-0 w-full p-4 bg-gradient-to-t from-black/80 to-transparent z-50 pb-8">
                 {viewStory.isMine ? (
-                    <div className="flex justify-between items-center bg-black/40 backdrop-blur-md p-3 rounded-2xl border border-white/10">
-                        <button onClick={() => setShowViewersModal(true)} className="flex items-center gap-2 text-white hover:bg-white/20 px-4 py-2 rounded-xl transition">
-                            <Eye size={20} /> <span className="font-bold">{viewers.length} Views</span>
-                        </button>
-                        <button onClick={() => deleteStory(viewStory.id)} className="p-2 text-red-400 hover:bg-red-500/20 rounded-xl transition"><Trash2 size={24} /></button>
+                    <div className="flex justify-center items-center gap-2 text-white bg-white/10 backdrop-blur-md p-3 rounded-full mx-auto w-fit cursor-pointer hover:bg-white/20 transition">
+                        <Eye size={20} /> 
+                        <span className="font-bold">{viewers.length} Views</span>
                     </div>
                 ) : (
-                    <div className="flex gap-3">
-                        <input type="text" placeholder="Send message..." className="flex-1 bg-transparent border border-white/40 rounded-full px-5 py-3 text-white placeholder-white/60 focus:outline-none focus:border-white focus:bg-white/10 transition-all" />
-                        <button className="p-3 bg-red-500/80 hover:bg-red-600 text-white rounded-full backdrop-blur-md transition active:scale-95"><Heart size={24} fill="currentColor"/></button>
-                        <button className="p-3 bg-blue-500/80 hover:bg-blue-600 text-white rounded-full backdrop-blur-md transition active:scale-95"><Send size={24} className="ml-0.5"/></button>
+                    <div className="flex items-center gap-3 w-full">
+                        <form onSubmit={(e) => handleSendReply(e)} className="flex-1 relative">
+                            <Input 
+                                value={replyText}
+                                onChange={(e) => setReplyText(e.target.value)}
+                                placeholder="Send message..." 
+                                className="w-full bg-transparent border border-white/60 text-white placeholder-white/70 rounded-full pl-4 pr-10 h-11 focus:border-white focus:ring-0"
+                            />
+                            {replyText && (
+                                <button type="submit" disabled={sendingReply} className="absolute right-2 top-1.5 text-white p-1 hover:bg-white/20 rounded-full">
+                                    <Send size={18} />
+                                </button>
+                            )}
+                        </form>
+                        
+                        <button onClick={(e) => handleSendReply(e, '❤️')} className="p-3 bg-gradient-to-r from-red-500 to-pink-500 rounded-full text-white shadow-lg active:scale-90 transition-transform">
+                            <Heart size={24} fill="currentColor" />
+                        </button>
                     </div>
                 )}
             </div>
