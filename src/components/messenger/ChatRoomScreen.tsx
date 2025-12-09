@@ -3,7 +3,7 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
 import { 
   ArrowLeft, Send, Phone, Video, Loader2, Image as ImageIcon, Smile, X, Mic, StopCircle, 
-  Trash2, Pin, MoreVertical, Check, CheckCheck, Reply, Copy, Forward, Star 
+  Trash2, Pin, MoreVertical, Check, CheckCheck, Reply, Copy, Forward, Star, Download 
 } from 'lucide-react';
 import EmojiPicker from 'emoji-picker-react';
 import { formatDistanceToNow } from 'date-fns';
@@ -41,7 +41,11 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
   const [showEmoji, setShowEmoji] = useState(false);
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+  
+  // Menu & Reply States
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
+  const [replyingTo, setReplyingTo] = useState<any | null>(null); // ✅ New Reply State
+  const [viewImage, setViewImage] = useState<string | null>(null); // ✅ New Image Viewer State
 
   const [isRecording, setIsRecording] = useState(false);
   const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
@@ -143,8 +147,14 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
 
   const handleSendMessage = async (e?: React.FormEvent, type: string = 'text', customContent?: string, fileBlob?: Blob) => {
     e?.preventDefault();
-    const content = customContent || newMessage;
-    if (!content.trim() && !selectedImage && !fileBlob) return;
+    let finalContent = customContent || newMessage;
+    
+    // ✅ Add Reply Context
+    if (replyingTo && type === 'text') {
+        finalContent = `> Replying to: ${replyingTo.content || 'Media'}\n\n${finalContent}`;
+    }
+
+    if (!finalContent.trim() && !selectedImage && !fileBlob) return;
     setSending(true);
     let uploadedUrl = null;
     try {
@@ -162,13 +172,15 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
             sender_id: user?.id,
             receiver_id: isGroup ? null : receiver.id,
             group_id: isGroup ? receiver.id : null,
-            content: (selectedImage ? 'Sent a photo' : content) || 'Sent a file',
+            content: (selectedImage ? 'Sent a photo' : finalContent) || 'Sent a file',
             type: selectedImage ? 'image' : type,
             image_url: uploadedUrl || (selectedImage ? imagePreview : null),
             status: 'sent',
             created_at: new Date().toISOString()
         };
-        setNewMessage(''); setSelectedImage(null); setImagePreview(null); setShowEmoji(false);
+        
+        // Reset States
+        setNewMessage(''); setSelectedImage(null); setImagePreview(null); setShowEmoji(false); setReplyingTo(null);
         playSound('sent');
         await supabase.from('messages').insert(msgData);
     } catch (err) { console.error(err); alert("Failed to send."); } 
@@ -211,7 +223,7 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
 
   const scrollToBottom = () => setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
 
-  // --- MENU ACTIONS (Working) ---
+  // --- MENU ACTIONS ---
   const handleUnsend = async (msgId: string) => {
     if(window.confirm("Delete this message for everyone?")) {
         await supabase.from('messages').delete().eq('id', msgId);
@@ -227,21 +239,22 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
   const handleCopy = (text: string) => {
     navigator.clipboard.writeText(text);
     setActiveMenuId(null);
-    // Optional: show a small toast
   };
 
-  const handleReply = (text: string) => {
-    setNewMessage((prev) => `> ${text}\n${prev}`);
+  // ✅ New Reply Logic
+  const handleReply = (msg: any) => {
+    setReplyingTo(msg);
     setActiveMenuId(null);
+    fileInputRef.current?.focus();
   };
 
   const handleForward = () => {
-    alert("Forward feature coming in next update!");
+    alert("Forward feature coming soon!");
     setActiveMenuId(null);
   };
 
   // --- RENDER MESSAGE ---
-  const renderMessageContent = (msg: any, isMe: boolean) => {
+  const renderMessageContent = (msg: any, isMe: boolean, idx: number) => {
     if (msg.type?.startsWith('call_')) {
       return (
         <div className="flex justify-center my-4 w-full">
@@ -254,6 +267,10 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
       );
     }
 
+    // ✅ Smart Menu Position (Top vs Bottom)
+    // If message is in first 2 positions, open menu downwards. Else upwards.
+    const menuPositionClass = idx < 2 ? "top-8 origin-top" : "bottom-8 origin-bottom";
+
     return (
         <div className={`flex ${isMe ? 'justify-end' : 'justify-start'} mb-2 group w-full relative items-end gap-2 px-2`}>
             {!isMe && <Avatar className="w-6 h-6 mb-1 border border-border"><AvatarImage src={receiver.avatar}/><AvatarFallback>{receiver.name[0]}</AvatarFallback></Avatar>}
@@ -261,32 +278,39 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
             <div className={`relative max-w-[75%] rounded-2xl p-1 overflow-hidden shadow-sm transition-all ${isMe ? 'bg-blue-600 text-white rounded-br-sm' : 'bg-white dark:bg-gray-800 border border-border/40 text-foreground rounded-bl-sm'}`}>
                 {msg.is_pinned && <div className="absolute top-1 right-1 z-10"><Pin size={10} className="fill-current rotate-45" /></div>}
                 
-                {msg.image_url && msg.type === 'image' && (<img src={msg.image_url} className="w-full h-auto rounded-xl object-cover max-h-60 min-w-[150px]" loading="lazy"/>)}
+                {/* ✅ Image Viewer Click Handler */}
+                {msg.image_url && msg.type === 'image' && (
+                    <img 
+                        src={msg.image_url} 
+                        className="w-full h-auto rounded-xl object-cover max-h-60 min-w-[150px] cursor-pointer hover:opacity-95" 
+                        loading="lazy"
+                        onClick={() => setViewImage(msg.image_url)}
+                    />
+                )}
+                
                 {msg.type === 'audio' && (<div className="px-3 py-2 flex items-center gap-2 min-w-[200px]"><audio controls src={msg.image_url} className="h-8 w-full" /></div>)}
                 {msg.content && msg.type !== 'image' && msg.type !== 'audio' && (<div className="px-3 py-2 text-[15px] break-words whitespace-pre-wrap leading-relaxed">{msg.content}</div>)}
                 
-                {/* Time & Status */}
                 <div className={`flex justify-end items-center gap-1 px-2 pb-1 text-[10px] ${isMe ? 'text-blue-200' : 'text-muted-foreground'}`}>
                     <span>{new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                     {isMe && !isGroup && (msg.status === 'seen' ? <CheckCheck size={12} strokeWidth={3} /> : <Check size={12} />)}
                 </div>
             </div>
 
-            {/* Menu Button */}
             <div className={`opacity-0 group-hover:opacity-100 transition-opacity self-center`}>
                  <button onClick={(e) => { e.stopPropagation(); setActiveMenuId(activeMenuId === msg.id ? null : msg.id); }} className="p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 text-muted-foreground">
                     <MoreVertical size={16} />
                  </button>
             </div>
             
-            {/* ✅ WhatsApp Style Context Menu (Fully Functional) */}
+            {/* ✅ Fixed Menu Position Logic */}
             {activeMenuId === msg.id && (
                 <div 
                     onClick={(e) => e.stopPropagation()}
-                    className={`absolute bottom-8 ${isMe ? 'right-4' : 'left-10'} bg-white/95 dark:bg-gray-800/95 backdrop-blur-md shadow-2xl rounded-xl py-1 w-48 border border-border z-50 animate-in zoom-in-95 origin-bottom`}
+                    className={`absolute ${menuPositionClass} ${isMe ? 'right-4' : 'left-10'} bg-white/95 dark:bg-gray-800/95 backdrop-blur-md shadow-2xl rounded-xl py-1 w-48 border border-border z-50 animate-in zoom-in-95`}
                 >
                     <div className="flex flex-col text-sm font-medium text-foreground">
-                        <button onClick={() => handleReply(msg.content)} className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-100 dark:hover:bg-gray-700/50 w-full text-left transition-colors">
+                        <button onClick={() => handleReply(msg)} className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-100 dark:hover:bg-gray-700/50 w-full text-left transition-colors">
                             <Reply size={16} /> Reply
                         </button>
                         <button onClick={() => handleCopy(msg.content)} className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-100 dark:hover:bg-gray-700/50 w-full text-left transition-colors">
@@ -362,13 +386,27 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
         onClick={() => {setShowEmoji(false); setActiveMenuId(null);}}
       >
         <div className="space-y-1">
-            {messages.map((msg, idx) => <React.Fragment key={idx}>{renderMessageContent(msg, msg.sender_id === user?.id)}</React.Fragment>)}
+            {messages.map((msg, idx) => <React.Fragment key={idx}>{renderMessageContent(msg, msg.sender_id === user?.id, idx)}</React.Fragment>)}
             <div ref={messagesEndRef} />
         </div>
       </div>
 
-      {/* Input Area */}
-      <div className="p-2 bg-gray-50 dark:bg-gray-900 border-t border-border/20 shrink-0 relative flex items-end gap-2">
+      {/* ✅ WhatsApp Style Footer */}
+      <div className="p-2 bg-gray-50 dark:bg-gray-900 border-t border-border/20 shrink-0 relative flex flex-col gap-2">
+        
+        {/* ✅ Reply Preview UI */}
+        {replyingTo && (
+            <div className="mx-2 p-2 bg-white dark:bg-gray-800 rounded-lg border-l-4 border-blue-500 shadow-sm flex justify-between items-center animate-slide-up">
+                <div className="flex-1 overflow-hidden">
+                    <p className="text-xs font-bold text-blue-500 mb-0.5">Replying to message</p>
+                    <p className="text-sm text-foreground truncate">{replyingTo.content || 'Attachment'}</p>
+                </div>
+                <button onClick={() => setReplyingTo(null)} className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full">
+                    <X size={16} />
+                </button>
+            </div>
+        )}
+
         {imagePreview && (
             <div className="absolute bottom-20 left-4 bg-white dark:bg-gray-800 p-2 rounded-xl shadow-lg border border-border z-10 animate-slide-up">
                 <img src={imagePreview} className="h-24 w-auto rounded-lg object-cover" />
@@ -378,42 +416,57 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
         
         {showEmoji && <div className="absolute bottom-20 left-2 z-50 shadow-xl rounded-2xl overflow-hidden animate-fade-in"><EmojiPicker onEmojiClick={(e) => setNewMessage(prev => prev + e.emoji)} height={300} width={300} /></div>}
 
-        <div className="flex-1 bg-white dark:bg-gray-800 rounded-[24px] border border-border/10 shadow-sm flex items-center px-1 py-1">
-            <Button type="button" variant="ghost" size="icon" onClick={() => setShowEmoji(!showEmoji)} className="text-gray-500 hover:text-yellow-500 rounded-full h-10 w-10 shrink-0">
-                <Smile size={24} />
-            </Button>
-            
-            <input 
-                value={newMessage} 
-                onChange={(e) => setNewMessage(e.target.value)} 
-                placeholder={isRecording ? `Recording... ${Math.floor(recordingDuration / 60)}:${(recordingDuration % 60).toString().padStart(2, '0')}` : "Message"} 
-                className={`flex-1 bg-transparent px-2 py-3 focus:outline-none text-[15px] text-foreground placeholder:text-muted-foreground ${isRecording ? 'text-red-500 font-bold animate-pulse' : ''}`} 
-                disabled={isRecording}
-                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) handleSendMessage(e); }}
-            />
-
-            <Button type="button" variant="ghost" size="icon" onClick={() => fileInputRef.current?.click()} className="text-gray-500 hover:text-green-500 rounded-full h-10 w-10 shrink-0 -mr-1">
-                <ImageIcon size={22} strokeWidth={2} />
-            </Button>
-            <input type="file" ref={fileInputRef} hidden accept="image/*" onChange={handleImageSelect} />
-        </div>
-
-        <div className="pb-1">
-            {newMessage.trim() || selectedImage ? (
-                <Button onClick={handleSendMessage} disabled={sending} className="rounded-full w-11 h-11 p-0 bg-blue-600 hover:bg-blue-700 text-white shadow-md transition-all active:scale-95 flex items-center justify-center">
-                    {sending ? <Loader2 size={20} className="animate-spin"/> : <Send size={20} className="ml-0.5"/>}
+        <div className="flex items-end gap-2">
+            <div className="flex-1 bg-white dark:bg-gray-800 rounded-[24px] border border-border/10 shadow-sm flex items-center px-1 py-1">
+                <Button type="button" variant="ghost" size="icon" onClick={() => setShowEmoji(!showEmoji)} className="text-gray-500 hover:text-yellow-500 rounded-full h-10 w-10 shrink-0">
+                    <Smile size={24} />
                 </Button>
-            ) : (
-                <Button 
-                    type="button" 
-                    onClick={toggleRecording} 
-                    className={`rounded-full w-11 h-11 p-0 shadow-md transition-all duration-300 flex items-center justify-center ${isRecording ? 'bg-red-500 scale-110 animate-pulse ring-4 ring-red-200' : 'bg-blue-600 hover:bg-blue-700 text-white'}`}
-                >
-                    {isRecording ? <StopCircle size={20} className="text-white"/> : <Mic size={20} className="text-white"/>}
+                
+                <input 
+                    value={newMessage} 
+                    onChange={(e) => setNewMessage(e.target.value)} 
+                    placeholder={isRecording ? `Recording... ${Math.floor(recordingDuration / 60)}:${(recordingDuration % 60).toString().padStart(2, '0')}` : "Message"} 
+                    className={`flex-1 bg-transparent px-2 py-3 focus:outline-none text-[15px] text-foreground placeholder:text-muted-foreground ${isRecording ? 'text-red-500 font-bold animate-pulse' : ''}`} 
+                    disabled={isRecording}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) handleSendMessage(e); }}
+                />
+
+                <Button type="button" variant="ghost" size="icon" onClick={() => fileInputRef.current?.click()} className="text-gray-500 hover:text-green-500 rounded-full h-10 w-10 shrink-0 -mr-1">
+                    <ImageIcon size={22} strokeWidth={2} />
                 </Button>
-            )}
+                <input type="file" ref={fileInputRef} hidden accept="image/*" onChange={handleImageSelect} />
+            </div>
+
+            <div className="pb-1">
+                {newMessage.trim() || selectedImage ? (
+                    <Button onClick={handleSendMessage} disabled={sending} className="rounded-full w-11 h-11 p-0 bg-blue-600 hover:bg-blue-700 text-white shadow-md transition-all active:scale-95 flex items-center justify-center">
+                        {sending ? <Loader2 size={20} className="animate-spin"/> : <Send size={20} className="ml-0.5"/>}
+                    </Button>
+                ) : (
+                    <Button 
+                        type="button" 
+                        onClick={toggleRecording} 
+                        className={`rounded-full w-11 h-11 p-0 shadow-md transition-all duration-300 flex items-center justify-center ${isRecording ? 'bg-red-500 scale-110 animate-pulse ring-4 ring-red-200' : 'bg-blue-600 hover:bg-blue-700 text-white'}`}
+                    >
+                        {isRecording ? <StopCircle size={20} className="text-white"/> : <Mic size={20} className="text-white"/>}
+                    </Button>
+                )}
+            </div>
         </div>
       </div>
+
+      {/* ✅ Full Screen Image Viewer */}
+      {viewImage && (
+        <div className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center animate-fade-in" onClick={() => setViewImage(null)}>
+            <img src={viewImage} className="max-w-full max-h-full object-contain" />
+            <button className="absolute top-4 right-4 text-white p-2 bg-white/10 rounded-full hover:bg-white/20">
+                <X size={24} />
+            </button>
+            <a href={viewImage} download target="_blank" onClick={(e) => e.stopPropagation()} className="absolute bottom-8 right-8 text-white p-3 bg-white/10 rounded-full hover:bg-white/20 backdrop-blur-md">
+                <Download size={24} />
+            </a>
+        </div>
+      )}
     </div>
   );
 };
