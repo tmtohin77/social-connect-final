@@ -42,7 +42,6 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
   const [showEmoji, setShowEmoji] = useState(false);
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
-  
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
   const [replyingTo, setReplyingTo] = useState<any | null>(null);
   const [viewImage, setViewImage] = useState<string | null>(null);
@@ -62,19 +61,21 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
     return () => document.removeEventListener('click', handleClickOutside);
   }, []);
 
-  // ✅ Call Presence Listener (Fix for Join Button)
+  // ✅ Fixed Presence Logic for Group Call Button
   useEffect(() => {
     if (!isGroup) return;
 
-    // Use the exact same channel name as GroupCall.tsx
+    // Use the exact same channel name as in GroupCall.tsx
     const channelName = `group_call:${receiver.id}`;
+    
+    // Note: Don't track presence here, just listen
     const callChannel = supabase.channel(channelName);
 
     callChannel
         .on('presence', { event: 'sync' }, () => {
             const state = callChannel.presenceState();
+            // Count users present in the call channel
             const count = Object.keys(state).length;
-            console.log("Active Callers:", count); // Debugging
             setActiveCallersCount(count);
         })
         .subscribe();
@@ -307,7 +308,7 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
     return <GroupCall groupId={receiver.id} onLeave={() => setIsGroupCallActive(false)} />;
   }
 
-  // Determine Call Status for Header
+  // ✅ Call Status Logic for Header
   const isCallOngoing = activeCallersCount > 0;
 
   return (
@@ -338,7 +339,7 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
         
         <div className="flex items-center gap-1 pr-1 text-blue-600 dark:text-blue-400">
             {isGroup ? (
-                // ✅ Join Button logic fixed
+                // ✅ Join Button logic: If call is active, show GREEN button. Else show normal video icon.
                 <Button 
                     variant={isCallOngoing ? "default" : "ghost"} 
                     size={isCallOngoing ? "sm" : "icon"} 

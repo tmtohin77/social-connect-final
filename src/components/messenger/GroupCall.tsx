@@ -15,10 +15,13 @@ interface PeerStream {
   stream: MediaStream;
 }
 
+// ✅ POWERFUL FREE STUN SERVERS
 const peerConfig = {
   config: {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun2.l.google.com:19302' },
       { urls: 'stun:global.stun.twilio.com:3478' }
     ]
   }
@@ -48,7 +51,10 @@ const GroupCall: React.FC<GroupCallProps> = ({ groupId, onLeave }) => {
       myStreamRef.current = stream;
       if (myVideoRef.current) myVideoRef.current.srcObject = stream;
 
-      const peer = new Peer(user?.id + '-' + groupId, peerConfig);
+      // ✅ FIX: undefined এর বদলে Random Unique ID দেওয়া হয়েছে
+      const uniquePeerId = `${user?.id}-${Math.random().toString(36).substr(2, 9)}`;
+      const peer = new Peer(uniquePeerId, peerConfig);
+      
       myPeerRef.current = peer;
 
       peer.on('open', (id) => {
@@ -63,8 +69,8 @@ const GroupCall: React.FC<GroupCallProps> = ({ groupId, onLeave }) => {
             setParticipants(users);
             
             users.forEach((u: any) => {
-                if (u.presence_ref !== id) {
-                   connectToPeer(u.presence_ref, stream, peer);
+                if (u.peer_id !== id) {
+                   connectToPeer(u.peer_id, stream, peer);
                 }
             });
         }).subscribe(async (status) => {
@@ -86,8 +92,12 @@ const GroupCall: React.FC<GroupCallProps> = ({ groupId, onLeave }) => {
         });
       });
 
+      peer.on('error', (err) => {
+          console.error("Peer Error:", err);
+      });
+
     } catch (err) {
-      console.error("Call Error:", err);
+      console.error("Media Error:", err);
       alert("Could not access camera/microphone.");
       onLeave();
     }
@@ -95,7 +105,9 @@ const GroupCall: React.FC<GroupCallProps> = ({ groupId, onLeave }) => {
 
   const connectToPeer = (peerId: string, stream: MediaStream, peer: Peer) => {
     if (peersRef.current.find(p => p.peerId === peerId)) return;
+    
     const call = peer.call(peerId, stream);
+    
     call.on('stream', (remoteStream) => {
         addPeerStream(peerId, remoteStream);
     });
@@ -146,16 +158,14 @@ const GroupCall: React.FC<GroupCallProps> = ({ groupId, onLeave }) => {
   };
 
   const getUserInfo = (peerId: string) => {
-    const p = participants.find((part: any) => part.presence_ref === peerId);
+    const p = participants.find((part: any) => part.peer_id === peerId);
     return p || { name: 'User', avatar: '' };
   };
 
-  // ✅ UI Logic: Nobody joined yet? Show ME full screen.
   const isAlone = peers.length === 0;
 
   return (
     <div className="fixed inset-0 z-[100] bg-black flex flex-col animate-fade-in">
-      {/* Header */}
       <div className="absolute top-0 left-0 right-0 p-4 z-20 flex justify-between items-center bg-gradient-to-b from-black/80 to-transparent">
         <div className="flex items-center gap-2 text-white">
             <Users size={20} />
@@ -168,10 +178,7 @@ const GroupCall: React.FC<GroupCallProps> = ({ groupId, onLeave }) => {
         </div>
       </div>
 
-      {/* Main Video Area */}
       <div className="flex-1 relative w-full h-full overflow-hidden">
-        
-        {/* CASE 1: ALONE (My Video Full Screen) */}
         {isAlone && (
             <div className="w-full h-full">
                 <video 
@@ -199,7 +206,6 @@ const GroupCall: React.FC<GroupCallProps> = ({ groupId, onLeave }) => {
             </div>
         )}
 
-        {/* CASE 2: OTHERS JOINED (Grid View + My Video Small) */}
         {!isAlone && (
             <div className="w-full h-full grid gap-1 p-1 
                 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 auto-rows-fr bg-gray-900">
@@ -221,7 +227,6 @@ const GroupCall: React.FC<GroupCallProps> = ({ groupId, onLeave }) => {
             </div>
         )}
 
-        {/* My Video Floating (When others are present) */}
         {!isAlone && (
             <div className="absolute bottom-24 right-4 w-32 h-48 sm:w-40 sm:h-60 bg-gray-900 rounded-2xl overflow-hidden border-2 border-white/20 shadow-2xl z-30 transition-all hover:scale-105">
                 <video 
@@ -231,21 +236,12 @@ const GroupCall: React.FC<GroupCallProps> = ({ groupId, onLeave }) => {
                     playsInline 
                     className={`w-full h-full object-cover scale-x-[-1] ${isCameraOff ? 'hidden' : ''}`} 
                 />
-                {isCameraOff && (
-                    <div className="absolute inset-0 flex items-center justify-center bg-gray-800">
-                        <Avatar className="w-12 h-12">
-                            <AvatarImage src={user?.avatar} />
-                            <AvatarFallback>ME</AvatarFallback>
-                        </Avatar>
-                    </div>
-                )}
             </div>
         )}
       </div>
 
-      {/* Controls Bar */}
       <div className="p-6 flex justify-center gap-8 bg-black/60 backdrop-blur-xl border-t border-white/10 z-40 absolute bottom-0 left-0 right-0">
-        <button onClick={toggleMute} className={`p-4 rounded-full transition-all active:scale-90 shadow-lg ${isMuted ? 'bg-white text-black' : 'bg-gray-800/80 text-white hover:bg-gray-700'}`}>
+        <button onClick={toggleMute} className={`p-4 rounded-full transition-all active:scale-90 shadow-lg ${isMuted ? 'bg-white text-black' : 'bg-gray-800 text-white hover:bg-gray-700'}`}>
           {isMuted ? <MicOff size={24} /> : <Mic size={24} />}
         </button>
         
@@ -253,7 +249,7 @@ const GroupCall: React.FC<GroupCallProps> = ({ groupId, onLeave }) => {
           <PhoneOff size={32} />
         </button>
 
-        <button onClick={toggleVideo} className={`p-4 rounded-full transition-all active:scale-90 shadow-lg ${isCameraOff ? 'bg-white text-black' : 'bg-gray-800/80 text-white hover:bg-gray-700'}`}>
+        <button onClick={toggleVideo} className={`p-4 rounded-full transition-all active:scale-90 shadow-lg ${isCameraOff ? 'bg-white text-black' : 'bg-gray-800 text-white hover:bg-gray-700'}`}>
             {isCameraOff ? <VideoOff size={24} /> : <Video size={24} />}
         </button>
       </div>
