@@ -1,9 +1,12 @@
+// ChatRoomScreen.tsx (Only the changes related to Group Call logic)
+// পুরো ফাইল রিপ্লেস করো নিচের কোড দিয়ে:
+
 import React, { useEffect, useState, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
 import { 
   ArrowLeft, Send, Phone, Video, Loader2, Image as ImageIcon, Smile, X, Mic, StopCircle, 
-  Trash2, Pin, MoreVertical, Check, CheckCheck, Reply, Copy, Forward, Star, Download 
+  Trash2, Pin, MoreVertical, Check, CheckCheck, Reply, Copy, Forward, Star, Download, Users 
 } from 'lucide-react';
 import EmojiPicker from 'emoji-picker-react';
 import { formatDistanceToNow } from 'date-fns';
@@ -35,17 +38,17 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
   const isGroup = receiver.type === 'group';
   const isActive = !isGroup && onlineUsers.has(receiver.id);
 
+  // Group Call States
   const [isGroupCallActive, setIsGroupCallActive] = useState(false);
-  const [ongoingCallUsers, setOngoingCallUsers] = useState<number>(0);
+  const [activeCallersCount, setActiveCallersCount] = useState(0);
 
   const [showEmoji, setShowEmoji] = useState(false);
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   
-  // Menu & Reply States
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
-  const [replyingTo, setReplyingTo] = useState<any | null>(null); // ✅ New Reply State
-  const [viewImage, setViewImage] = useState<string | null>(null); // ✅ New Image Viewer State
+  const [replyingTo, setReplyingTo] = useState<any | null>(null);
+  const [viewImage, setViewImage] = useState<string | null>(null);
 
   const [isRecording, setIsRecording] = useState(false);
   const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
@@ -56,7 +59,6 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Close menu on click outside
   useEffect(() => {
     const handleClickOutside = () => setActiveMenuId(null);
     document.addEventListener('click', handleClickOutside);
@@ -67,6 +69,7 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
     fetchHistory();
     markAsSeen();
 
+    // 1. Chat Realtime
     const chatChannel = supabase.channel(`chat:${receiver.id}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, (payload) => {
         if (payload.eventType === 'DELETE') {
@@ -94,15 +97,20 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
       })
       .subscribe();
 
+    // 2. Group Call Presence (Check if anyone is in call)
     let callChannel: any = null;
     if (isGroup) {
-        callChannel = supabase.channel(`group_call:${receiver.id}`)
-            .on('presence', { event: 'sync' }, () => {
-                const state = callChannel.presenceState();
-                const count = Object.keys(state).length;
-                setOngoingCallUsers(count);
-            })
-            .subscribe();
+        // Must subscribe to the SAME channel name as GroupCall.tsx
+        callChannel = supabase.channel(`group_call:${receiver.id}`, {
+            config: { presence: { key: user?.id } }
+        });
+
+        callChannel.on('presence', { event: 'sync' }, () => {
+            const state = callChannel.presenceState();
+            // Count total users in the call room
+            const count = Object.values(state).flat().length;
+            setActiveCallersCount(count);
+        }).subscribe();
     }
 
     return () => { 
@@ -117,25 +125,7 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
     else msgQuery = msgQuery.or(`and(sender_id.eq.${user?.id},receiver_id.eq.${receiver.id}),and(sender_id.eq.${receiver.id},receiver_id.eq.${user?.id})`);
     
     const { data: msgs } = await msgQuery;
-    
-    let calls: any[] = [];
-    if (!isGroup) {
-        const { data: callLogs } = await supabase.from('calls').select('*')
-            .or(`and(caller_id.eq.${user?.id},receiver_id.eq.${receiver.id}),and(caller_id.eq.${receiver.id},receiver_id.eq.${user?.id})`);
-        
-        if (callLogs) {
-            calls = callLogs.map(c => ({
-                id: c.id,
-                sender_id: c.caller_id,
-                content: c.type === 'missed' ? 'Missed call' : `Call ended (${Math.floor(c.duration/60)}m ${c.duration%60}s)`,
-                type: `call_${c.type}`,
-                created_at: c.created_at,
-                is_call_log: true
-            }));
-        }
-    }
-
-    const combined = [...(msgs || []), ...calls].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+    const combined = [...(msgs || [])].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
     setMessages(combined);
     scrollToBottom();
   };
@@ -148,12 +138,7 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
   const handleSendMessage = async (e?: React.FormEvent, type: string = 'text', customContent?: string, fileBlob?: Blob) => {
     e?.preventDefault();
     let finalContent = customContent || newMessage;
-    
-    // ✅ Add Reply Context
-    if (replyingTo && type === 'text') {
-        finalContent = `> Replying to: ${replyingTo.content || 'Media'}\n\n${finalContent}`;
-    }
-
+    if (replyingTo && type === 'text') finalContent = `> Replying to: ${replyingTo.content || 'Media'}\n\n${finalContent}`;
     if (!finalContent.trim() && !selectedImage && !fileBlob) return;
     setSending(true);
     let uploadedUrl = null;
@@ -178,8 +163,6 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
             status: 'sent',
             created_at: new Date().toISOString()
         };
-        
-        // Reset States
         setNewMessage(''); setSelectedImage(null); setImagePreview(null); setShowEmoji(false); setReplyingTo(null);
         playSound('sent');
         await supabase.from('messages').insert(msgData);
@@ -223,9 +206,8 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
 
   const scrollToBottom = () => setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
 
-  // --- MENU ACTIONS ---
   const handleUnsend = async (msgId: string) => {
-    if(window.confirm("Delete this message for everyone?")) {
+    if(window.confirm("Delete this message?")) {
         await supabase.from('messages').delete().eq('id', msgId);
         setActiveMenuId(null);
     }
@@ -241,19 +223,12 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
     setActiveMenuId(null);
   };
 
-  // ✅ New Reply Logic
   const handleReply = (msg: any) => {
     setReplyingTo(msg);
     setActiveMenuId(null);
     fileInputRef.current?.focus();
   };
 
-  const handleForward = () => {
-    alert("Forward feature coming soon!");
-    setActiveMenuId(null);
-  };
-
-  // --- RENDER MESSAGE ---
   const renderMessageContent = (msg: any, isMe: boolean, idx: number) => {
     if (msg.type?.startsWith('call_')) {
       return (
@@ -267,8 +242,6 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
       );
     }
 
-    // ✅ Smart Menu Position (Top vs Bottom)
-    // If message is in first 2 positions, open menu downwards. Else upwards.
     const menuPositionClass = idx < 2 ? "top-8 origin-top" : "bottom-8 origin-bottom";
 
     return (
@@ -278,7 +251,6 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
             <div className={`relative max-w-[75%] rounded-2xl p-1 overflow-hidden shadow-sm transition-all ${isMe ? 'bg-blue-600 text-white rounded-br-sm' : 'bg-white dark:bg-gray-800 border border-border/40 text-foreground rounded-bl-sm'}`}>
                 {msg.is_pinned && <div className="absolute top-1 right-1 z-10"><Pin size={10} className="fill-current rotate-45" /></div>}
                 
-                {/* ✅ Image Viewer Click Handler */}
                 {msg.image_url && msg.type === 'image' && (
                     <img 
                         src={msg.image_url} 
@@ -303,7 +275,6 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
                  </button>
             </div>
             
-            {/* ✅ Fixed Menu Position Logic */}
             {activeMenuId === msg.id && (
                 <div 
                     onClick={(e) => e.stopPropagation()}
@@ -315,9 +286,6 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
                         </button>
                         <button onClick={() => handleCopy(msg.content)} className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-100 dark:hover:bg-gray-700/50 w-full text-left transition-colors">
                             <Copy size={16} /> Copy
-                        </button>
-                        <button onClick={handleForward} className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-100 dark:hover:bg-gray-700/50 w-full text-left transition-colors">
-                            <Forward size={16} /> Forward
                         </button>
                         <button onClick={() => handlePin(msg)} className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-100 dark:hover:bg-gray-700/50 w-full text-left transition-colors">
                             <Star size={16} /> {msg.is_pinned ? 'Unstar' : 'Star'}
@@ -340,8 +308,6 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
 
   return (
     <div className="flex flex-col h-screen bg-[#EFE7DD] dark:bg-gray-950 fixed inset-0 z-[60] transition-colors font-sans">
-      
-      {/* Header */}
       <div className="bg-white dark:bg-gray-900 px-2 py-2 flex items-center justify-between shadow-sm border-b border-border/10 shrink-0 z-20">
         <div className="flex items-center gap-1">
             <Button variant="ghost" size="icon" onClick={onBack} className="rounded-full text-foreground"><ArrowLeft size={22} /></Button>
@@ -357,7 +323,7 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
                     <h3 className="font-semibold text-base text-foreground leading-tight">{receiver.name}</h3>
                     {isGroup ? (
                         <span className="text-xs text-muted-foreground flex items-center gap-1">
-                            {ongoingCallUsers > 0 ? <span className="text-red-500 font-bold animate-pulse flex items-center gap-1">● Live ({ongoingCallUsers})</span> : 'tap for info'}
+                            {activeCallersCount > 0 ? <span className="text-red-500 font-bold animate-pulse flex items-center gap-1">● Live ({activeCallersCount})</span> : 'tap for info'}
                         </span>
                     ) : (
                         <span className={`text-xs ${isActive ? 'text-green-600 font-medium' : 'text-muted-foreground'}`}>{isActive ? 'Online' : 'Offline'}</span>
@@ -368,8 +334,18 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
         
         <div className="flex items-center gap-1 pr-1 text-blue-600 dark:text-blue-400">
             {isGroup ? (
-                <Button variant={ongoingCallUsers > 0 ? "default" : "ghost"} size="icon" onClick={() => setIsGroupCallActive(true)} className={`rounded-full ${ongoingCallUsers > 0 ? 'bg-green-600 hover:bg-green-700 text-white animate-pulse' : ''}`}>
-                    <Video size={24} />
+                // ✅ Join Button logic: if count > 0, show JOIN.
+                <Button 
+                    variant={activeCallersCount > 0 ? "default" : "ghost"} 
+                    size={activeCallersCount > 0 ? "sm" : "icon"} 
+                    onClick={() => setIsGroupCallActive(true)} 
+                    className={`rounded-full transition-all ${activeCallersCount > 0 ? 'bg-green-600 hover:bg-green-700 text-white animate-pulse px-4' : ''}`}
+                >
+                    {activeCallersCount > 0 ? (
+                        <span className="flex items-center gap-2 font-bold">Join <Video size={18} /></span>
+                    ) : (
+                        <Video size={24} />
+                    )}
                 </Button>
             ) : (
                 <>
@@ -380,7 +356,6 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
         </div>
       </div>
 
-      {/* Messages Area */}
       <div 
         className="flex-1 overflow-y-auto p-4 bg-[url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')] dark:bg-none bg-repeat bg-center"
         onClick={() => {setShowEmoji(false); setActiveMenuId(null);}}
@@ -391,10 +366,7 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
         </div>
       </div>
 
-      {/* ✅ WhatsApp Style Footer */}
       <div className="p-2 bg-gray-50 dark:bg-gray-900 border-t border-border/20 shrink-0 relative flex flex-col gap-2">
-        
-        {/* ✅ Reply Preview UI */}
         {replyingTo && (
             <div className="mx-2 p-2 bg-white dark:bg-gray-800 rounded-lg border-l-4 border-blue-500 shadow-sm flex justify-between items-center animate-slide-up">
                 <div className="flex-1 overflow-hidden">
@@ -455,7 +427,6 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
         </div>
       </div>
 
-      {/* ✅ Full Screen Image Viewer */}
       {viewImage && (
         <div className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center animate-fade-in" onClick={() => setViewImage(null)}>
             <img src={viewImage} className="max-w-full max-h-full object-contain" />
