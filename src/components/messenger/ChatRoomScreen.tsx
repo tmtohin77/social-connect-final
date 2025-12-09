@@ -1,6 +1,3 @@
-// ChatRoomScreen.tsx (Only the changes related to Group Call logic)
-// পুরো ফাইল রিপ্লেস করো নিচের কোড দিয়ে:
-
 import React, { useEffect, useState, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
@@ -65,11 +62,32 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
     return () => document.removeEventListener('click', handleClickOutside);
   }, []);
 
+  // ✅ Call Presence Listener (Fix for Join Button)
+  useEffect(() => {
+    if (!isGroup) return;
+
+    // Use the exact same channel name as GroupCall.tsx
+    const channelName = `group_call:${receiver.id}`;
+    const callChannel = supabase.channel(channelName);
+
+    callChannel
+        .on('presence', { event: 'sync' }, () => {
+            const state = callChannel.presenceState();
+            const count = Object.keys(state).length;
+            console.log("Active Callers:", count); // Debugging
+            setActiveCallersCount(count);
+        })
+        .subscribe();
+
+    return () => {
+        supabase.removeChannel(callChannel);
+    };
+  }, [receiver.id, isGroup]);
+
   useEffect(() => {
     fetchHistory();
     markAsSeen();
 
-    // 1. Chat Realtime
     const chatChannel = supabase.channel(`chat:${receiver.id}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, (payload) => {
         if (payload.eventType === 'DELETE') {
@@ -97,25 +115,8 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
       })
       .subscribe();
 
-    // 2. Group Call Presence (Check if anyone is in call)
-    let callChannel: any = null;
-    if (isGroup) {
-        // Must subscribe to the SAME channel name as GroupCall.tsx
-        callChannel = supabase.channel(`group_call:${receiver.id}`, {
-            config: { presence: { key: user?.id } }
-        });
-
-        callChannel.on('presence', { event: 'sync' }, () => {
-            const state = callChannel.presenceState();
-            // Count total users in the call room
-            const count = Object.values(state).flat().length;
-            setActiveCallersCount(count);
-        }).subscribe();
-    }
-
     return () => { 
         supabase.removeChannel(chatChannel); 
-        if (callChannel) supabase.removeChannel(callChannel);
     };
   }, [receiver.id, isGroup, user?.id]);
 
@@ -207,7 +208,7 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
   const scrollToBottom = () => setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
 
   const handleUnsend = async (msgId: string) => {
-    if(window.confirm("Delete this message?")) {
+    if(window.confirm("Delete this message for everyone?")) {
         await supabase.from('messages').delete().eq('id', msgId);
         setActiveMenuId(null);
     }
@@ -306,6 +307,9 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
     return <GroupCall groupId={receiver.id} onLeave={() => setIsGroupCallActive(false)} />;
   }
 
+  // Determine Call Status for Header
+  const isCallOngoing = activeCallersCount > 0;
+
   return (
     <div className="flex flex-col h-screen bg-[#EFE7DD] dark:bg-gray-950 fixed inset-0 z-[60] transition-colors font-sans">
       <div className="bg-white dark:bg-gray-900 px-2 py-2 flex items-center justify-between shadow-sm border-b border-border/10 shrink-0 z-20">
@@ -323,7 +327,7 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
                     <h3 className="font-semibold text-base text-foreground leading-tight">{receiver.name}</h3>
                     {isGroup ? (
                         <span className="text-xs text-muted-foreground flex items-center gap-1">
-                            {activeCallersCount > 0 ? <span className="text-red-500 font-bold animate-pulse flex items-center gap-1">● Live ({activeCallersCount})</span> : 'tap for info'}
+                            {isCallOngoing ? <span className="text-red-500 font-bold animate-pulse flex items-center gap-1">● Live ({activeCallersCount})</span> : 'tap for info'}
                         </span>
                     ) : (
                         <span className={`text-xs ${isActive ? 'text-green-600 font-medium' : 'text-muted-foreground'}`}>{isActive ? 'Online' : 'Offline'}</span>
@@ -334,14 +338,14 @@ const ChatRoomScreen: React.FC<ChatRoomProps> = ({ receiver, onBack, onViewProfi
         
         <div className="flex items-center gap-1 pr-1 text-blue-600 dark:text-blue-400">
             {isGroup ? (
-                // ✅ Join Button logic: if count > 0, show JOIN.
+                // ✅ Join Button logic fixed
                 <Button 
-                    variant={activeCallersCount > 0 ? "default" : "ghost"} 
-                    size={activeCallersCount > 0 ? "sm" : "icon"} 
+                    variant={isCallOngoing ? "default" : "ghost"} 
+                    size={isCallOngoing ? "sm" : "icon"} 
                     onClick={() => setIsGroupCallActive(true)} 
-                    className={`rounded-full transition-all ${activeCallersCount > 0 ? 'bg-green-600 hover:bg-green-700 text-white animate-pulse px-4' : ''}`}
+                    className={`rounded-full transition-all ${isCallOngoing ? 'bg-green-600 hover:bg-green-700 text-white animate-pulse px-4' : ''}`}
                 >
-                    {activeCallersCount > 0 ? (
+                    {isCallOngoing ? (
                         <span className="flex items-center gap-2 font-bold">Join <Video size={18} /></span>
                     ) : (
                         <Video size={24} />
